@@ -90,18 +90,19 @@ load_or_init_secrets() {
   step "Secrets"
   ensure_dirs
 
+  local pre_db_pass
+  pre_db_pass="${RIVEN_DB_PASSWORD:-}"
+
   if [ ! -f "$SECRETS_ENV" ]; then
     umask 077
     : >"$SECRETS_ENV"
 
-    local api_key auth_secret db_pass
+    local api_key auth_secret
     api_key="$(rand_hex 16)"          # 32 chars
     auth_secret="$(rand_hex 32)"      # 64 chars
-    db_pass="$(rand_hex 24)"          # 48 chars
 
     write_env_kv "RIVEN_API_KEY" "$api_key" "$SECRETS_ENV"
     write_env_kv "FRONTEND_AUTH_SECRET" "$auth_secret" "$SECRETS_ENV"
-    write_env_kv "RIVEN_DB_PASSWORD" "$db_pass" "$SECRETS_ENV"
 
     ok "Generated secrets at $SECRETS_ENV"
   else
@@ -112,6 +113,23 @@ load_or_init_secrets() {
   set -a
   . "$SECRETS_ENV"
   set +a
+
+  # Prefer user-provided DB password from the container environment.
+  if [ -n "${pre_db_pass:-}" ]; then
+    export RIVEN_DB_PASSWORD="$pre_db_pass"
+  fi
+
+  # Back-compat: older installs may have RIVEN_DB_PASSWORD persisted in monolith.env.
+  # New installs must provide it via env/.env.
+  if [ -z "${RIVEN_DB_PASSWORD:-}" ]; then
+    fail "RIVEN_DB_PASSWORD is not set."
+    fail "Set it in your .env (host) so docker compose passes it into the container."
+    exit 1
+  fi
+
+  if grep -qE '^RIVEN_DB_PASSWORD=' "$SECRETS_ENV" 2>/dev/null; then
+    warn "RIVEN_DB_PASSWORD is also present in $SECRETS_ENV (legacy). Environment value takes precedence."
+  fi
 }
 
 configure_fuse() {

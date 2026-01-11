@@ -30,6 +30,10 @@ services:
       # Keep env minimal. Most secrets are generated on first boot and persisted under /riven/data/secrets.
       - TZ=${TZ:-UTC}
 
+      # DB password must be user-provided (set in .env). This is used to set/rotate
+      # the embedded Postgres role password and to build the backend connection string.
+      - RIVEN_DB_PASSWORD=${RIVEN_DB_PASSWORD:?Set RIVEN_DB_PASSWORD in .env}
+
       # Optional feature selection:
       # - none (default)
       # - plex

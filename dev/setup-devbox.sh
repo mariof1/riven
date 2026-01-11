@@ -83,6 +83,37 @@ prompt() {
   printf "%s" "$answer"
 }
 
+prompt_secret() {
+  # Usage: prompt_secret "Question" "existing_or_empty" -> prints answer (hidden input)
+  local question="$1"
+  local existing_value="$2"
+
+  if ! is_interactive; then
+    printf "%s" "$existing_value"
+    return
+  fi
+
+  local answer
+  if [ -n "${existing_value:-}" ]; then
+    read -r -s -p "${question} (leave blank to keep existing): " answer </dev/tty || true
+    printf "\n" 1>&2
+    if [ -z "${answer:-}" ]; then
+      answer="$existing_value"
+    fi
+  else
+    while true; do
+      read -r -s -p "${question}: " answer </dev/tty || true
+      printf "\n" 1>&2
+      if [ -n "${answer:-}" ]; then
+        break
+      fi
+      warn "Value cannot be empty"
+    done
+  fi
+
+  printf "%s" "$answer"
+}
+
 prompt_yn() {
   # Usage: prompt_yn "Question" "y"|"n" -> returns 0 for yes, 1 for no
   local question="$1"
@@ -426,7 +457,7 @@ ensure_env_file() {
   fi
   tz_default="${tz_default:-UTC}"
 
-  local tz media_flavor node_version plex_deb_url plex_claim
+  local tz media_flavor node_version plex_deb_url plex_claim db_password
   tz="$(prompt "Timezone (TZ)" "$(env_get "$env_path" TZ "$tz_default")")"
 
   # Minimal feature selection for now.
@@ -440,6 +471,8 @@ ensure_env_file() {
   esac
 
   node_version="$(prompt "Node runtime version (NODE_VERSION)" "$(env_get "$env_path" NODE_VERSION "24.0.0")")"
+
+  db_password="$(prompt_secret "RIVEN_DB_PASSWORD (embedded Postgres role password)" "$(env_get "$env_path" RIVEN_DB_PASSWORD "")")"
 
   local ui_port plex_port expose_plex
   ui_port="$(prompt_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")")"
@@ -465,6 +498,10 @@ ensure_env_file() {
   cat > "$env_path" <<EOF
 # Local devbox env (auto-generated). Safe to edit.
 TZ=$tz
+
+# User-provided password for the embedded Postgres role used by Riven.
+# This is passed into the monolith container as RIVEN_DB_PASSWORD.
+RIVEN_DB_PASSWORD=$db_password
 
 # Host port mapping for the UI container port 3000.
 RIVEN_UI_PORT=$ui_port
