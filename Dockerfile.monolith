@@ -27,7 +27,6 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     gcc \
-    git \
   libfuse3-dev \
     libffi-dev \
     libxml2-dev \

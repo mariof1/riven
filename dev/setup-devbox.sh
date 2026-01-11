@@ -478,11 +478,10 @@ apt_install_prereqs() {
 
   step "Installing prerequisites"
   spinner "Updating apt index" $SUDO apt-get update -y
-  spinner "Installing packages (git, curl, ca-certificates, gnupg, openssl)" \
+  spinner "Installing packages (curl, ca-certificates, gnupg, openssl)" \
     $SUDO apt-get install -y \
       ca-certificates \
       curl \
-      git \
       gnupg \
       lsb-release \
       openssl
