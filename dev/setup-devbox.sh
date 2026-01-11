@@ -12,10 +12,101 @@ set -euo pipefail
 # - Prepares ./container_data folders with correct ownership
 # - Builds and starts the monorepo dev stack (backend+frontend+embedded Postgres)
 
-log() { printf "[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
+# User-friendly output + minimal spam:
+# - Writes full command output to a log file
+# - Shows a spinner for long-running steps
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+is_tty() {
+  [ -t 1 ]
+}
+
+init_ui() {
+  if is_tty && need_cmd tput; then
+    BOLD="$(tput bold)"
+    DIM="$(tput dim)"
+    RESET="$(tput sgr0)"
+    RED="$(tput setaf 1)"
+    GREEN="$(tput setaf 2)"
+    YELLOW="$(tput setaf 3)"
+    BLUE="$(tput setaf 4)"
+  else
+    BOLD=""; DIM=""; RESET=""; RED=""; GREEN=""; YELLOW=""; BLUE=""
+  fi
+
+  LOG_FILE="${LOG_FILE:-/tmp/riven-devbox-setup.$(date +%Y%m%d-%H%M%S).log}"
+}
+
+say() {
+  # shellcheck disable=SC2059
+  printf "%b\n" "$*" 1>&2
+}
+
+ok() { say "${GREEN}✔${RESET} $*"; }
+warn() { say "${YELLOW}•${RESET} $*"; }
+fail() { say "${RED}✖${RESET} $*"; }
+
+step() {
+  say "${BOLD}${BLUE}==>${RESET} ${BOLD}$*${RESET}"
+}
+
+spinner() {
+  # Usage: spinner "Message" cmd arg...
+  local message="$1"; shift
+  local -a cmd=("$@")
+
+  if ! is_tty; then
+    say "$message"
+    run_quiet "${cmd[@]}"
+    return
+  fi
+
+  local spin='|/-\\'
+  local i=0
+
+  # Run command in background, logging output.
+  run_quiet "${cmd[@]}" &
+  local cmd_pid=$!
+
+  while kill -0 "$cmd_pid" >/dev/null 2>&1; do
+    i=$(( (i + 1) % 4 ))
+    printf "\r${DIM}%s %s${RESET}" "${spin:$i:1}" "$message" 1>&2
+    sleep 0.12
+  done
+
+  wait "$cmd_pid"
+  local rc=$?
+  printf "\r" 1>&2
+
+  if [ "$rc" -eq 0 ]; then
+    ok "$message"
+  else
+    fail "$message"
+    fail "See log: ${LOG_FILE}"
+    tail -n 80 "$LOG_FILE" 1>&2 || true
+    exit "$rc"
+  fi
+}
+
+run_quiet() {
+  # Runs a command, appending stdout/stderr to LOG_FILE.
+  # Do not echo the command itself (avoid spam), but keep it in the log.
+  {
+    printf "\n[%s] $ " "$(date +%H:%M:%S)"
+    printf "%q " "$@"
+    printf "\n"
+  } >>"$LOG_FILE"
+
+  "$@" >>"$LOG_FILE" 2>&1
+}
+
+on_err() {
+  local rc=$?
+  fail "Setup failed (exit $rc)."
+  fail "Log: ${LOG_FILE}"
+  tail -n 80 "$LOG_FILE" 1>&2 || true
+  exit "$rc"
 }
 
 require_sudo() {
@@ -65,19 +156,42 @@ detect_os() {
   fi
 }
 
+validate_repo_root() {
+  if [ ! -f docker-compose-dev-full.yml ]; then
+    fail "Run this from the repo root (missing docker-compose-dev-full.yml)."
+    exit 1
+  fi
+}
+
+validate_network() {
+  if need_cmd curl; then
+    spinner "Checking network access" curl -fsSL https://download.docker.com/ -o /dev/null
+  else
+    warn "curl not installed yet; skipping network check."
+  fi
+}
+
+validate_prereqs() {
+  if ! need_cmd bash; then
+    fail "bash not found (unexpected)."
+    exit 1
+  fi
+}
+
 apt_install_prereqs() {
   require_sudo
   detect_os
 
-  log "Installing prerequisites (git, curl, ca-certificates, gnupg, openssl)…"
-  $SUDO apt-get update -y
-  $SUDO apt-get install -y \
-    ca-certificates \
-    curl \
-    git \
-    gnupg \
-    lsb-release \
-    openssl
+  step "Installing prerequisites"
+  spinner "Updating apt index" $SUDO apt-get update -y
+  spinner "Installing packages (git, curl, ca-certificates, gnupg, openssl)" \
+    $SUDO apt-get install -y \
+      ca-certificates \
+      curl \
+      git \
+      gnupg \
+      lsb-release \
+      openssl
 }
 
 install_docker() {
@@ -85,13 +199,14 @@ install_docker() {
   detect_os
 
   if need_cmd docker && docker --version >/dev/null 2>&1; then
-    log "Docker already installed: $(docker --version)"
+    step "Docker"
+    ok "Docker already installed: $(docker --version)"
     return
   fi
 
-  log "Installing Docker Engine + docker compose plugin…"
+  step "Installing Docker Engine + docker compose plugin"
 
-  $SUDO install -m 0755 -d /etc/apt/keyrings
+  spinner "Preparing apt keyrings" $SUDO install -m 0755 -d /etc/apt/keyrings
 
   if [[ "$OS_ID" == "ubuntu" ]]; then
     DOCKER_REPO="https://download.docker.com/linux/ubuntu"
@@ -99,22 +214,23 @@ install_docker() {
     DOCKER_REPO="https://download.docker.com/linux/debian"
   fi
 
-  curl -fsSL "$DOCKER_REPO/gpg" | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+  spinner "Adding Docker apt repository GPG key" bash -lc \
+    "curl -fsSL '$DOCKER_REPO/gpg' | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
+  spinner "Setting key permissions" $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
 
   ARCH="$($SUDO dpkg --print-architecture)"
-  echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] ${DOCKER_REPO} ${CODENAME} stable" \
-    | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+  spinner "Adding Docker apt source" bash -lc \
+    "echo 'deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] ${DOCKER_REPO} ${CODENAME} stable' | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null"
 
-  $SUDO apt-get update -y
-  $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  spinner "Updating apt index (Docker repo)" $SUDO apt-get update -y
+  spinner "Installing docker-ce + compose plugin" \
+    $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+  spinner "Enabling Docker service" $SUDO systemctl enable --now docker
 
   if [ "$(id -u)" -ne 0 ]; then
-    log "Adding current user to docker group…"
-    $SUDO usermod -aG docker "$USER" || true
-    log "Note: you may need to log out/in for docker group changes to apply."
+    spinner "Adding current user to docker group" $SUDO usermod -aG docker "$USER"
+    warn "You may need to log out/in (or run: newgrp docker)"
   fi
 }
 
@@ -137,7 +253,8 @@ docker_cmd() {
 ensure_env_file() {
   local env_path=".env"
   if [ -f "$env_path" ]; then
-    log "Using existing $env_path"
+    step "Environment (.env)"
+    ok "Using existing $env_path"
     return
   fi
 
@@ -150,7 +267,8 @@ ensure_env_file() {
   api_key="$(openssl rand -hex 16)"         # 32 chars
   auth_secret="$(openssl rand -hex 32)"     # 64 chars
 
-  log "Creating $env_path with generated secrets…"
+  step "Environment (.env)"
+  say "${DIM}Creating $env_path with generated secrets…${RESET}"
 
   cat > "$env_path" <<EOF
 # Local devbox env (auto-generated). Safe to edit.
@@ -172,11 +290,11 @@ FRONTEND_AUTH_SECRET=$auth_secret
 # RIVEN_MOUNT_BIND_OPTS=:rshared
 EOF
 
-  log "Wrote $env_path (gitignored via .env*)."
+  ok "Wrote $env_path (gitignored via .env*)."
 }
 
 prepare_container_data() {
-  log "Preparing ./container_data folders…"
+  step "Local data directories"
   mkdir -p container_data/riven container_data/frontend container_data/mount
 
   local puid pgid
@@ -186,44 +304,56 @@ prepare_container_data() {
   # Match the compose PUID/PGID defaults; most servers use 1000, but we set from .env.
   # These folders are bind-mounted into containers that may run as UID:GID.
   if [ "$(id -u)" -eq 0 ]; then
-    chown -R "$puid:$pgid" container_data || true
+    run_quiet chown -R "$puid:$pgid" container_data || true
   else
     require_sudo
-    $SUDO chown -R "$puid:$pgid" container_data || true
+    run_quiet $SUDO chown -R "$puid:$pgid" container_data || true
   fi
+  ok "Prepared ./container_data"
 }
 
 compose_up() {
   local DOCKER
   DOCKER="$(docker_cmd)"
 
-  log "Building and starting dev stack (backend+frontend+embedded Postgres)…"
-  $DOCKER compose -f docker-compose-dev-full.yml up -d --build
+  step "Build + start containers"
+  spinner "docker compose up (build + start)" \
+    $DOCKER compose -f docker-compose-dev-full.yml up -d --build
 
-  log "Smoke test: backend OpenAPI + frontend HTTP…"
-  # Best-effort checks; don’t fail hard if curl isn’t installed yet.
+  step "Smoke test"
   if need_cmd curl; then
-    curl -fsS http://localhost:8080/openapi.json >/dev/null
-    curl -fsS -o /dev/null -w "%{http_code}\n" -L http://localhost:3000/ | grep -qE '^(200|3..)$'
-    log "OK: http://localhost:8080 and http://localhost:3000"
+    spinner "Backend OpenAPI reachable" curl -fsS http://localhost:8080/openapi.json -o /dev/null
+    spinner "Frontend reachable" bash -lc "curl -fsS -o /dev/null -w '%{http_code}\n' -L http://localhost:3000/ | grep -qE '^(200|3..)$'"
+    ok "OK: http://localhost:8080 and http://localhost:3000"
   else
-    log "curl not found; skipping HTTP checks."
+    warn "curl not found; skipping HTTP checks."
   fi
 }
 
 main() {
-  if [ ! -f docker-compose-dev-full.yml ]; then
-    echo "Run this from the repo root (missing docker-compose-dev-full.yml)." >&2
-    exit 1
-  fi
+  init_ui
+  trap on_err ERR
 
+  say "${BOLD}Riven devbox setup${RESET} ${DIM}(this will install Docker + start containers)${RESET}"
+  say "${DIM}Log: ${LOG_FILE}${RESET}"
+
+  validate_repo_root
+  validate_prereqs
+
+  # OS detection early for clearer errors.
+  detect_os
+  require_sudo
+
+  validate_network
   apt_install_prereqs
   install_docker
   ensure_env_file
   prepare_container_data
   compose_up
 
-  log "Done. If docker commands fail with permission denied, log out/in or run: newgrp docker"
+  say ""
+  ok "Done"
+  warn "If docker commands fail with permission denied: log out/in or run: newgrp docker"
 }
 
 main "$@"
