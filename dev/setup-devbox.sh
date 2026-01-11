@@ -40,6 +40,8 @@ init_ui() {
 
 SUDO_KEEPALIVE_PID=""
 
+AUTO_START_CONTAINERS="y"
+
 cleanup() {
   if [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill -0 "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1; then
     kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
@@ -486,14 +488,38 @@ NODE_VERSION=$node_version
 EOF
 
   ok "Wrote $env_path (gitignored via .env*)."
+}
 
-  # Offer to regenerate secrets that are persisted under ./container_data/monolith.
-  # These include the backend API key used by the frontend.
-  if is_interactive; then
-    if prompt_yn "Regenerate monolith secrets (API key/auth/db password)?" "n"; then
-      rm -f container_data/monolith/secrets/monolith.env 2>/dev/null || true
-      ok "Deleted container_data/monolith/secrets/monolith.env (will be re-generated on next start)"
-    fi
+maybe_regenerate_monolith_secrets() {
+  # Secrets are persisted under ./container_data/monolith and include the backend API key
+  # used by the frontend. Keep this interactive and upfront.
+  if ! is_interactive; then
+    return
+  fi
+
+  step "Secrets"
+  if prompt_yn "Regenerate monolith secrets (API key/auth/db password)?" "n"; then
+    rm -f container_data/monolith/secrets/monolith.env 2>/dev/null || true
+    ok "Deleted container_data/monolith/secrets/monolith.env (will be re-generated on next start)"
+  else
+    ok "Keeping existing monolith secrets"
+  fi
+}
+
+confirm_run_unattended() {
+  # After the interactive phase, the script should run unattended.
+  if ! is_interactive; then
+    return
+  fi
+
+  step "Confirmation"
+  say "${DIM}All prompts are complete. Next steps are non-interactive:${RESET}"
+  say "${DIM}- apt installs (if needed)${RESET}"
+  say "${DIM}- Docker install (if needed)${RESET}"
+  say "${DIM}- build + start containers${RESET}"
+
+  if ! prompt_yn "Continue?" "y"; then
+    AUTO_START_CONTAINERS="n"
   fi
 }
 
@@ -559,20 +585,22 @@ main() {
   require_sudo
   ensure_sudo_cached
 
+  # === Interactive phase (all prompts up-front) ===
+  ensure_env_file
+  maybe_regenerate_monolith_secrets
+  confirm_run_unattended
+
+  if [ "${AUTO_START_CONTAINERS}" != "y" ]; then
+    ok "Stopped before installing/building/starting"
+    warn "Re-run any time: ./dev/setup-devbox.sh"
+    return
+  fi
+
+  # === Unattended phase ===
   validate_network
   apt_install_prereqs
   install_docker
-  ensure_env_file
   prepare_container_data
-
-  if is_interactive; then
-    if ! prompt_yn "Build + start containers now?" "y"; then
-      ok "Skipping container start"
-      warn "Run later from repo root: docker compose -f docker-compose-dev-monolith.yml up -d --build"
-      return
-    fi
-  fi
-
   compose_up
 
   say ""
