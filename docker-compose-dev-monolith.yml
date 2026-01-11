@@ -49,11 +49,5 @@ services:
       # Optional override: where persistent data is stored inside container.
       - RIVEN_DATA_DIR=/riven/data
 
-    devices:
-      - /dev/fuse
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
     volumes:
       - ./container_data/monolith:/riven/data

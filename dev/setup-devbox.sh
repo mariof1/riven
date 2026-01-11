@@ -276,7 +276,7 @@ write_compose_override() {
   local media_flavor="$3"
   local plex_port="$4"
   local expose_plex="$5"
-  local disable_fuse="$6"
+  local enable_fuse="$6"
 
   cat >"$override_path" <<EOF
 services:
@@ -285,11 +285,14 @@ services:
       - "${ui_port}:3000"
 EOF
 
-  if [ "${disable_fuse}" = "y" ]; then
+  if [ "${enable_fuse}" = "y" ]; then
     cat >>"$override_path" <<EOF
-    devices: []
-    cap_add: []
-    security_opt: []
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
 EOF
   fi
 
@@ -753,15 +756,16 @@ compose_up() {
   local override_file
   override_file="${COMPOSE_OVERRIDE_FILE:-/tmp/riven-dev-monolith.override.yml}"
 
-  local disable_fuse
-  disable_fuse="n"
-  if ! host_has_fuse; then
-    disable_fuse="y"
+  local enable_fuse
+  enable_fuse="n"
+  if host_has_fuse; then
+    enable_fuse="y"
+  else
     warn "Host is missing /dev/fuse; starting without FUSE/VFS support"
     warn "To enable later: install fuse (e.g. sudo apt-get install fuse3) and load the module (sudo modprobe fuse), then re-run."
   fi
 
-  write_compose_override "$override_file" "$ui_port" "$media_flavor" "$plex_port" "$expose_plex" "$disable_fuse"
+  write_compose_override "$override_file" "$ui_port" "$media_flavor" "$plex_port" "$expose_plex" "$enable_fuse"
 
   step "Build + start containers"
   spinner "docker compose up (build + start)" \
