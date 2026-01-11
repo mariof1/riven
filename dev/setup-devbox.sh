@@ -45,6 +45,10 @@ SUDO_KEEPALIVE_PID=""
 AUTO_START_CONTAINERS="y"
 AUTO_CONTINUE="y"
 
+CREATE_SWAPFILE="n"
+SWAPFILE_PATH="/swapfile"
+SWAPFILE_SIZE_GB="4"
+
 cleanup() {
   if [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill -0 "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1; then
     kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
@@ -305,6 +309,77 @@ EOF
 
 host_has_fuse() {
   [ -e /dev/fuse ]
+}
+
+meminfo_kb() {
+  # Usage: meminfo_kb MemTotal|SwapTotal
+  local key="$1"
+  awk -v k="$key" '$1==k":" {print $2; exit}' /proc/meminfo 2>/dev/null || true
+}
+
+low_memory_build_risk() {
+  # Heuristic: Vite/SvelteKit build inside Docker can exceed RAM on small VMs and get OOM-killed.
+  # Return 0 when we should recommend swap.
+  local mem_kb swap_kb
+  mem_kb="$(meminfo_kb MemTotal)"
+  swap_kb="$(meminfo_kb SwapTotal)"
+
+  mem_kb="${mem_kb:-0}"
+  swap_kb="${swap_kb:-0}"
+
+  # Recommend swap if RAM < ~4GiB and swap < ~2GiB.
+  [ "$mem_kb" -lt 4000000 ] && [ "$swap_kb" -lt 2000000 ]
+}
+
+prompt_swapfile_if_needed() {
+  if ! is_interactive; then
+    return
+  fi
+
+  if ! low_memory_build_risk; then
+    return
+  fi
+
+  step "Memory"
+  warn "Low memory detected; Docker build may be OOM-killed (exit 137)."
+  say "${DIM}Recommendation: enable swap before building the monolith image.${RESET}"
+
+  if prompt_yn "Create and enable a ${SWAPFILE_SIZE_GB}G swapfile at ${SWAPFILE_PATH}?" "y"; then
+    CREATE_SWAPFILE="y"
+  fi
+}
+
+ensure_swapfile() {
+  if [ "${CREATE_SWAPFILE}" != "y" ]; then
+    return
+  fi
+
+  require_sudo
+
+  step "Swap"
+
+  # If swap already exists and is active, do nothing.
+  if need_cmd swapon && swapon --show=NAME 2>/dev/null | grep -Fxq "$SWAPFILE_PATH"; then
+    ok "Swap already active: $SWAPFILE_PATH"
+    return
+  fi
+
+  if [ -e "$SWAPFILE_PATH" ]; then
+    warn "$SWAPFILE_PATH already exists; will try enabling it"
+  else
+    spinner "Creating swapfile (${SWAPFILE_SIZE_GB}G)" $SUDO fallocate -l "${SWAPFILE_SIZE_GB}G" "$SWAPFILE_PATH"
+    spinner "Setting swapfile permissions" $SUDO chmod 600 "$SWAPFILE_PATH"
+    spinner "Formatting swapfile" $SUDO mkswap "$SWAPFILE_PATH"
+  fi
+
+  spinner "Enabling swap" $SUDO swapon "$SWAPFILE_PATH"
+
+  # Persist across reboots.
+  if ! grep -qE "^${SWAPFILE_PATH}[[:space:]]+" /etc/fstab 2>/dev/null; then
+    spinner "Persisting swap in /etc/fstab" bash -lc "echo '${SWAPFILE_PATH} none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null"
+  fi
+
+  ok "Swap enabled"
 }
 
 spinner() {
@@ -827,6 +902,9 @@ confirm_run_unattended() {
   say "${DIM}- Docker install (if needed)${RESET}"
   say "${DIM}- build + start containers${RESET}"
 
+  # Offer swapfile creation during the interactive phase (helps small VMs).
+  prompt_swapfile_if_needed
+
   if ! prompt_yn "Continue with setup steps now?" "y"; then
     AUTO_CONTINUE="n"
     return
@@ -927,6 +1005,7 @@ main() {
   apt_install_prereqs
   install_docker
   docker_runtime_check
+  ensure_swapfile
   prepare_container_data
   if [ "${AUTO_START_CONTAINERS}" = "y" ]; then
     compose_up
