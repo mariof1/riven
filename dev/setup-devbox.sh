@@ -49,6 +49,8 @@ CREATE_SWAPFILE="n"
 SWAPFILE_PATH="/swapfile"
 SWAPFILE_SIZE_GB="4"
 
+DOCKER_GROUP_ADDED="n"
+
 cleanup() {
   if [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill -0 "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1; then
     kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
@@ -596,6 +598,17 @@ install_docker() {
   if need_cmd docker && docker --version >/dev/null 2>&1; then
     step "Docker"
     ok "Docker already installed: $(docker --version)"
+
+    # Even if Docker is already installed, make sure the current user is in the
+    # docker group so future shells can use docker without sudo.
+    if [ "$(id -u)" -ne 0 ]; then
+      if getent group docker >/dev/null 2>&1; then
+        if ! user_in_group_db docker "${USER}"; then
+          spinner "Adding current user to docker group" $SUDO usermod -aG docker "$USER"
+          DOCKER_GROUP_ADDED="y"
+        fi
+      fi
+    fi
     return
   fi
 
@@ -624,7 +637,15 @@ install_docker() {
   spinner "Enabling Docker service" $SUDO systemctl enable --now docker
 
   if [ "$(id -u)" -ne 0 ]; then
-    spinner "Adding current user to docker group" $SUDO usermod -aG docker "$USER"
+    if ! getent group docker >/dev/null 2>&1; then
+      spinner "Creating docker group" $SUDO groupadd docker
+    fi
+
+    if ! user_in_group_db docker "${USER}"; then
+      spinner "Adding current user to docker group" $SUDO usermod -aG docker "$USER"
+      DOCKER_GROUP_ADDED="y"
+    fi
+
     if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -Fxq docker; then
       if need_cmd sg && user_in_group_db docker "${USER}"; then
         ok "Picked up docker group via 'sg docker' for this run"
@@ -1045,7 +1066,23 @@ main() {
 
   say ""
   ok "Done"
-  warn "If docker commands fail with permission denied: log out/in or run: newgrp docker"
+
+  # Only show docker-group hints if they're actually relevant.
+  case "$(docker_cmd_mode)" in
+    direct)
+      :
+      ;;
+    sg)
+      warn "Docker group is set but not active in this shell yet; run: newgrp docker (or log out/in)"
+      ;;
+    sudo)
+      if [ "${DOCKER_GROUP_ADDED}" = "y" ]; then
+        warn "Docker group was updated; log out/in (or run: newgrp docker) to use docker without sudo"
+      else
+        warn "Docker still requires sudo in this shell; add your user to the docker group or use sudo"
+      fi
+      ;;
+  esac
 }
 
 main "$@"
