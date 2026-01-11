@@ -877,6 +877,22 @@ ensure_env_file() {
 
   if [ "$media_flavor" = "plex" ]; then
     say "${DIM}Plex is proprietary; you must supply a direct .deb URL to install it at runtime.${RESET}"
+
+    if is_interactive; then
+      local plex_signup_default
+      if [ "${enable_plex_signup}" = "true" ]; then
+        plex_signup_default="y"
+      else
+        plex_signup_default="n"
+      fi
+
+      if prompt_yn "Allow Plex OAuth to create users on first login? (ENABLE_PLEX_SIGNUP)" "$plex_signup_default"; then
+        enable_plex_signup="true"
+      else
+        enable_plex_signup="false"
+      fi
+    fi
+
     plex_deb_url="$(maybe_change_value "PLEX_DEB_URL (required for Plex)" "$plex_deb_url" "https://downloads.plex.tv/.../plexmediaserver_*.deb")"
     plex_claim="$(maybe_change_value "PLEX_CLAIM (optional)" "$plex_claim" "")"
 
