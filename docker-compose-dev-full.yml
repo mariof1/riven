@@ -1,0 +1,96 @@
+# Full local dev stack (backend + frontend) from a single repo checkout.
+#
+# Usage:
+#   docker compose -f docker-compose-dev-full.yml up -d --build
+#   docker compose -f docker-compose-dev-full.yml down
+#
+# Notes:
+# - Backend runs on http://localhost:8080
+# - Frontend runs on http://localhost:3000
+# - Backend image is built from this repo root.
+# - Frontend image is built from ./frontend
+
+services:
+  riven:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      no_cache: true
+    image: riven-local:dev
+    container_name: riven
+    restart: unless-stopped
+    tty: true
+    shm_size: 1024m
+    ports:
+      - "8080:8080"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      # For local dev we keep ORIGIN at the backend URL.
+      - ORIGIN=${RIVEN_ORIGIN:-http://localhost:8080}
+      - RIVEN_FORCE_ENV=true
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_postgres/riven
+    healthcheck:
+      test: curl -s http://localhost:8080 >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ./container_data/riven:/riven/data
+      - ./container_data/mount:/mount:rshared,z
+    depends_on:
+      riven_postgres:
+        condition: service_healthy
+
+  riven_postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: riven
+    volumes:
+      - ./container_data/db:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  riven_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: riven-frontend-local:dev
+    container_name: riven-frontend
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "3000:3000"
+    environment:
+      - TZ=UTC
+      - ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      # Server-side calls from the frontend container to the backend container.
+      - BACKEND_URL=http://riven:8080
+      # Must match the backend's RIVEN_API_KEY if you set one.
+      - BACKEND_API_KEY=${RIVEN_API_KEY:-}
+      # Frontend persists its sqlite db here.
+      - DATABASE_URL=/riven/data/riven.db
+      # Replace for any real deployment.
+      - AUTH_SECRET=${FRONTEND_AUTH_SECRET:-change_me}
+    volumes:
+      - ./container_data/frontend:/riven/data
+    depends_on:
+      riven:
+        condition: service_healthy
