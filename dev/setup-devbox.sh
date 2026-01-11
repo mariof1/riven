@@ -679,7 +679,7 @@ maybe_regenerate_monolith_secrets() {
   fi
 
   step "Secrets"
-  if prompt_yn "Regenerate monolith secrets (API key/auth/db password)?" "n"; then
+  if prompt_yn "Regenerate monolith secrets (API key/auth secret)?" "n"; then
     rm -f container_data/monolith/secrets/monolith.env 2>/dev/null || true
     ok "Deleted container_data/monolith/secrets/monolith.env (will be re-generated on next start)"
   else
