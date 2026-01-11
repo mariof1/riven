@@ -123,15 +123,17 @@ prompt_secret() {
 
   local answer
   if [ -n "${existing_value:-}" ]; then
-    read -r -s -p "${question} (leave blank to keep existing): " answer </dev/tty || true
-    printf "\n" 1>&2
+    printf "%s" "${question} (leave blank to keep existing): " >/dev/tty
+    IFS= read -r -s answer </dev/tty || true
+    printf "\n" >/dev/tty
     if [ -z "${answer:-}" ]; then
       answer="$existing_value"
     fi
   else
     while true; do
-      read -r -s -p "${question}: " answer </dev/tty || true
-      printf "\n" 1>&2
+      printf "%s" "${question}: " >/dev/tty
+      IFS= read -r -s answer </dev/tty || true
+      printf "\n" >/dev/tty
       if [ -n "${answer:-}" ]; then
         break
       fi
@@ -604,6 +606,18 @@ ensure_env_file() {
     fi
   fi
 
+  # Ensure DB password is set so the stack can start.
+  if [ -z "${db_password:-}" ]; then
+    if is_interactive; then
+      warn "RIVEN_DB_PASSWORD is required to start the monolith"
+      db_password="$(prompt_secret "RIVEN_DB_PASSWORD (required)" "")"
+    else
+      fail "RIVEN_DB_PASSWORD is not set in $env_path"
+      fail "Set it and re-run (required to start the monolith)."
+      exit 1
+    fi
+  fi
+
   ui_port="$(maybe_change_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")" "3000")"
   plex_port="$(env_get "$env_path" PLEX_PORT "32400")"
   expose_plex="$(env_get "$env_path" PLEX_EXPOSE_PORT "n")"
@@ -628,9 +642,7 @@ ensure_env_file() {
     fi
   fi
 
-  if [ -z "${db_password:-}" ]; then
-    warn "RIVEN_DB_PASSWORD is empty; container start will fail until you set it."
-  fi
+  # (db_password is guaranteed non-empty here)
 
   cat > "$env_path" <<EOF
 # Local devbox env (auto-generated). Safe to edit.
