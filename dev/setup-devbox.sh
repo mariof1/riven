@@ -90,7 +90,7 @@ parse_args() {
 }
 
 is_interactive() {
-  is_tty && [ -r /dev/tty ]
+  [ -r /dev/tty ] && [ -w /dev/tty ]
 }
 
 prompt() {
