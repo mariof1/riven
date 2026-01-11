@@ -559,6 +559,40 @@ docker_cmd() {
   echo "$SUDO docker"
 }
 
+docker_runtime_check() {
+  local DOCKER
+  DOCKER="$(docker_cmd)"
+
+  step "Docker runtime"
+  say "${DIM}Verifying containers can start…${RESET}"
+
+  # Use a tiny image to validate runtime. This also surfaces common host issues
+  # (unprivileged LXC, rootless limitations, daemon default sysctls).
+  set +e
+  local out rc
+  out="$($DOCKER run --rm --pull=always alpine:3.20 true 2>&1)"
+  rc=$?
+  set -e
+
+  if [ "$rc" -eq 0 ]; then
+    ok "Docker containers can start"
+    return
+  fi
+
+  fail "Docker containers failed to start"
+  say "$out" 1>&2
+
+  if echo "$out" | grep -qi "ip_unprivileged_port_start"; then
+    warn "This host appears to block container sysctl setup (net.ipv4.ip_unprivileged_port_start)."
+    warn "Common causes: running Docker inside an unprivileged LXC/container, or a Docker daemon configured with default sysctls."
+    warn "Fix options:"
+    warn "- If this is LXC/Proxmox: enable nesting + keyctl on the host and allow sysctls."
+    warn "- Check /etc/docker/daemon.json for 'default-sysctls' and remove that entry, then: sudo systemctl restart docker"
+  fi
+
+  exit 1
+}
+
 ensure_env_file() {
   local env_path=".env"
 
@@ -815,6 +849,7 @@ main() {
   validate_network
   apt_install_prereqs
   install_docker
+  docker_runtime_check
   prepare_container_data
   if [ "${AUTO_START_CONTAINERS}" = "y" ]; then
     compose_up
