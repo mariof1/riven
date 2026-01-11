@@ -54,69 +54,20 @@ We are constantly adding features and improvements as we go along and squashing 
 
 ### Installation
 
-1) Find a good place on your hard drive we can call mount from now on. For the sake of things I will call it /path/to/riven/mount.
+This repo currently targets a **single-container monolith** (dev) that runs:
+- Frontend UI
+- Backend API (internal-only)
+- Embedded Postgres
 
-2) Copy over the contents of [docker-compose.yml](docker-compose.yml) to your `docker-compose.yml` file.
-
-> [!IMPORTANT]
-> This `docker-compose.yml` runs Postgres **inside the frontend container** (embedded Postgres) so there is **no separate DB container**.
-> The frontend data volume you configure below will store both the frontend's own data and the embedded Postgres data directory.
->
-> If you use prebuilt images, the frontend image must include embedded Postgres support. If it doesn't, build your own frontend image from this repo's [frontend/Dockerfile](frontend/Dockerfile) or use the local dev compose file [docker-compose-dev-full.yml](docker-compose-dev-full.yml).
-
-3) Modify the PATHS in the `docker-compose.yml` file volumes to match your environment:
-
-- Backend persistent data:
-
-```yaml
-  - /path/to/riven/data:/riven/data
-```
-
-- Frontend persistent data (also stores embedded Postgres under `/riven/data/postgres`):
-
-```yaml
-  - /path/to/riven/frontend:/riven/data
-```
-
-When adding `/mount` to any container, make sure to add `:rshared,z` to the end of the volume mount. Like this:
-
-```yaml
-volumes:
-  - /path/to/riven/data:/riven/data
-  - /path/to/riven/mount:/mount:rshared,z
-```
-
-4) Set secrets / keys (recommended):
-
-- `RIVEN_API_KEY` must match between backend + frontend.
-- `FRONTEND_AUTH_SECRET` must be at least 32 characters.
-
-Example:
+For a quick local run, use the monolith compose file:
 
 ```bash
-export RIVEN_API_KEY='dev_only_change_me_1234567890123'
-export FRONTEND_AUTH_SECRET='dev_auth_secret_change_me_123456'
+docker compose -f docker-compose-dev-monolith.yml up -d --build
 ```
 
-5) Make your mount directory a bind mount and mark it shared (run once per boot):
+This exposes only the UI on `http://localhost:3000`.
 
-```bash
-sudo mkdir -p /path/to/riven/mount
-sudo mount --bind /path/to/riven/mount /path/to/riven/mount
-sudo mount --make-rshared /path/to/riven/mount
-```
-
-- Verify propagation:
-
-```bash
-findmnt -T /path/to/riven/mount -o TARGET,PROPAGATION  # expect: shared or rshared
-```
-
-6) Start the containers:
-
-```bash
-docker compose up -d
-```
+Persistent data (including generated secrets and Postgres data) is stored under `./container_data/monolith`.
 
 > [!TIP]
 > **Make it automatic on boot**
@@ -241,7 +192,7 @@ bash dev/clone-and-setup.sh
 ```
 
 Notes:
-- The script creates a local `.env` with generated secrets and uses the monorepo dev compose file [docker-compose-dev-full.yml](docker-compose-dev-full.yml).
+- The script creates a minimal local `.env` and uses the monolith compose file [docker-compose-dev-monolith.yml](docker-compose-dev-monolith.yml).
 - If Docker group permissions don't apply immediately, log out/in or run `newgrp docker`.
 
 ### What the settings do

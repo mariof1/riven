@@ -8,7 +8,7 @@ set -euo pipefail
 #
 # What it does:
 # - Installs system prerequisites + Docker Engine + docker compose plugin
-# - Creates a local .env (not committed) with sane defaults + generated secrets
+# - Creates a local .env (not committed) with minimal defaults (no required secrets)
 # - Prepares ./container_data folders with correct ownership
 # - Builds and starts the monorepo dev stack (backend+frontend+embedded Postgres)
 
@@ -156,9 +156,11 @@ detect_os() {
   fi
 }
 
+COMPOSE_FILE_DEFAULT="docker-compose-dev-monolith.yml"
+
 validate_repo_root() {
-  if [ ! -f docker-compose-dev-full.yml ]; then
-    fail "Run this from the repo root (missing docker-compose-dev-full.yml)."
+  if [ ! -f "$COMPOSE_FILE_DEFAULT" ]; then
+    fail "Run this from the repo root (missing $COMPOSE_FILE_DEFAULT)."
     exit 1
   fi
 }
@@ -258,36 +260,28 @@ ensure_env_file() {
     return
   fi
 
-  local puid pgid tz
-  puid="$(id -u)"
-  pgid="$(id -g)"
-  tz="UTC"
-
-  local api_key auth_secret
-  api_key="$(openssl rand -hex 16)"         # 32 chars
-  auth_secret="$(openssl rand -hex 32)"     # 64 chars
-
   step "Environment (.env)"
   say "${DIM}Creating $env_path with generated secrets…${RESET}"
 
+  local tz
+  tz="UTC"
+
   cat > "$env_path" <<EOF
 # Local devbox env (auto-generated). Safe to edit.
-PUID=$puid
-PGID=$pgid
 TZ=$tz
 
-# Backend/Frontend shared API key (must match both sides)
-RIVEN_API_KEY=$api_key
+# Monolith feature selection:
+# - none (default)
+# - plex
+RIVEN_MEDIA_FLAVOR=none
 
-# Frontend auth secret (must be >= 32 chars)
-FRONTEND_AUTH_SECRET=$auth_secret
+# Optional: enable Plex (proprietary) by providing a .deb URL + claim token.
+# PLEX_DEB_URL=https://downloads.plex.tv/.../plexmediaserver_*.deb
+# PLEX_CLAIM=claim-xxxx
+# (Other Plex settings can be added as PLEX_* vars.)
 
-# Optional overrides
-# RIVEN_ORIGIN=http://localhost:8080
-# FRONTEND_ORIGIN=http://localhost:3000
-
-# Optional: set to ':rshared' if you need mount propagation and your host supports it
-# RIVEN_MOUNT_BIND_OPTS=:rshared
+# Optional: pin Node tarball version used in the monolith build.
+# NODE_VERSION=24.0.0
 EOF
 
   ok "Wrote $env_path (gitignored via .env*)."
@@ -295,7 +289,7 @@ EOF
 
 prepare_container_data() {
   step "Local data directories"
-  mkdir -p container_data/riven container_data/frontend container_data/mount
+  mkdir -p container_data/monolith
 
   local puid pgid
   puid="$(id -u)"
@@ -309,7 +303,7 @@ prepare_container_data() {
     require_sudo
     run_quiet $SUDO chown -R "$puid:$pgid" container_data || true
   fi
-  ok "Prepared ./container_data"
+  ok "Prepared ./container_data/monolith"
 }
 
 compose_up() {
@@ -318,13 +312,12 @@ compose_up() {
 
   step "Build + start containers"
   spinner "docker compose up (build + start)" \
-    $DOCKER compose -f docker-compose-dev-full.yml up -d --build
+    $DOCKER compose -f "$COMPOSE_FILE_DEFAULT" up -d --build
 
   step "Smoke test"
   if need_cmd curl; then
-    spinner "Backend OpenAPI reachable" curl -fsS http://localhost:8080/openapi.json -o /dev/null
     spinner "Frontend reachable" bash -lc "curl -fsS -o /dev/null -w '%{http_code}\n' -L http://localhost:3000/ | grep -qE '^(200|3..)$'"
-    ok "OK: http://localhost:8080 and http://localhost:3000"
+    ok "OK: http://localhost:3000"
   else
     warn "curl not found; skipping HTTP checks."
   fi

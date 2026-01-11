@@ -1,0 +1,115 @@
+# Monolith (dev): single container running backend + frontend + embedded Postgres.
+# Base requirement: Debian (bookworm) with Python 3.13 (project requires ~=3.13).
+#
+# Notes:
+# - Plex is proprietary; this image does NOT bundle Plex. If enabled at runtime,
+#   the entrypoint can install Plex from a user-provided .deb URL.
+
+# -----------------
+# Frontend Builder
+# -----------------
+FROM node:24-bookworm AS frontend_builder
+ENV NODE_OPTIONS=--max-old-space-size=4096
+WORKDIR /app
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml* ./
+COPY frontend/ ./
+RUN npm install -g pnpm && pnpm install
+RUN pnpm run build
+RUN pnpm prune --prod
+
+# -----------------
+# Backend Builder
+# -----------------
+FROM python:3.13-bookworm AS backend_builder
+
+# Build deps for python packages (pyfuse3, lxml, etc.)
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    gcc \
+    git \
+    libffi-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    pkg-config \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+WORKDIR /app
+COPY pyproject.toml uv.lock* ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    uv venv .venv && uv sync --no-dev --frozen
+
+# -----------------
+# Final Image
+# -----------------
+FROM python:3.13-bookworm
+LABEL name="Riven" \
+      description="Riven monolith (dev)" \
+      url="https://github.com/rivenmedia/riven"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Runtime deps:
+# - Postgres server
+# - FUSE
+# - node runtime
+# - curl for optional Plex install and health checks
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    fuse3 \
+    gosu \
+    libcap2-bin \
+    postgresql \
+    postgresql-contrib \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 24 runtime (official tarball)
+ARG NODE_VERSION=24.0.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) node_arch="x64" ;; \
+      arm64) node_arch="arm64" ;; \
+      *) echo "Unsupported arch for node: $arch"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -o /tmp/node.tar.xz; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; \
+    rm -f /tmp/node.tar.xz; \
+    node --version; npm --version
+
+# Configure FUSE allow_other
+RUN sed -i 's/^#\s*user_allow_other/user_allow_other/' /etc/fuse.conf || true \
+  && (grep -q '^user_allow_other' /etc/fuse.conf || echo 'user_allow_other' >> /etc/fuse.conf)
+
+WORKDIR /riven
+
+# Backend venv
+COPY --from=backend_builder /app/.venv /riven/.venv
+ENV PATH="/riven/.venv/bin:${PATH}"
+
+# Backend code
+COPY src/ ./src
+COPY pyproject.toml uv.lock* ./
+
+# Frontend runtime
+COPY --from=frontend_builder /app/build /riven/frontend/build
+COPY --from=frontend_builder /app/node_modules /riven/frontend/node_modules
+COPY --from=frontend_builder /app/package.json /riven/frontend/package.json
+COPY frontend/drizzle /riven/frontend/drizzle
+
+# Entrypoint
+COPY docker-entrypoint-monolith.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint-monolith.sh
+
+# Ports: UI exposed; backend is internal only.
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint-monolith.sh"]

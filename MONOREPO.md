@@ -19,15 +19,15 @@ From the repo root:
 
 ## Run locally (docker compose)
 
-- `docker compose -f docker-compose-dev-full.yml up -d --build`
+- `docker compose -f docker-compose-dev-monolith.yml up -d --build`
 
 This starts:
-- Backend on `http://localhost:8080`
 - Frontend on `http://localhost:3000`
 
 Notes:
-- The backend requires PostgreSQL, but in this dev setup Postgres is run **inside** the frontend container (embedded Postgres).
-- Embedded Postgres data persists under `./container_data/frontend/postgres` (inside the container it's `${PGDATA:-/riven/data/postgres}`).
+- Backend API is internal-only (localhost inside the container).
+- Postgres runs inside the same container.
+- Persistent data lives under `./container_data/monolith`.
 
 ## Dev box bootstrap (fresh Debian/Ubuntu)
 

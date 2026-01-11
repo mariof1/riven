@@ -1,0 +1,55 @@
+# Single-container dev monolith.
+#
+# Usage:
+#   docker compose -f docker-compose-dev-monolith.yml up -d --build
+#
+# Notes:
+# - Backend API is internal-only (localhost inside container).
+# - Frontend UI is exposed on http://localhost:3000
+# - Postgres runs inside the same container.
+# - Plex is optional (proprietary): enabled via RIVEN_MEDIA_FLAVOR=plex and PLEX_DEB_URL.
+
+services:
+  riven_monolith:
+    build:
+      context: .
+      dockerfile: Dockerfile.monolith
+      args:
+        # Pin Node runtime (tarball) version in final stage.
+        NODE_VERSION: ${NODE_VERSION:-24.0.0}
+    image: riven-monolith-local:dev
+    container_name: riven-monolith
+    restart: unless-stopped
+    tty: true
+    shm_size: 1024m
+    ports:
+      - "3000:3000"
+      # Optional Plex UI/clients (enable Plex first):
+      # - "32400:32400"
+    environment:
+      # Keep env minimal. Most secrets are generated on first boot and persisted under /riven/data/secrets.
+      - TZ=${TZ:-UTC}
+
+      # Optional feature selection:
+      # - none (default)
+      # - plex
+      # - all (reserved)
+      - RIVEN_MEDIA_FLAVOR=${RIVEN_MEDIA_FLAVOR:-none}
+
+      # Optional Plex vars (only used if RIVEN_MEDIA_FLAVOR=plex):
+      # - PLEX_DEB_URL=https://downloads.plex.tv/.../plexmediaserver_*.deb
+      # - PLEX_CLAIM=claim-xxxx
+      - PLEX_DEB_URL=${PLEX_DEB_URL:-}
+      - PLEX_CLAIM=${PLEX_CLAIM:-}
+
+      # Optional override: where persistent data is stored inside container.
+      - RIVEN_DATA_DIR=/riven/data
+
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ./container_data/monolith:/riven/data
