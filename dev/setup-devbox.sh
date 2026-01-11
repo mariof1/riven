@@ -229,9 +229,15 @@ spinner() {
     sleep 0.12
   done
 
+  # `wait` can return non-zero; with `set -e` that would abort before we can
+  # print a useful error. Capture it explicitly.
+  set +e
   wait "$cmd_pid"
   local rc=$?
-  printf "\r" 1>&2
+  set -e
+
+  # Clear the spinner line so the prompt doesn't appear on it.
+  printf "\r\033[K" 1>&2
 
   if [ "$rc" -eq 0 ]; then
     ok "$message"
