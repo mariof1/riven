@@ -2,7 +2,6 @@ import { redirect } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { env } from "$env/dynamic/private";
 import { generatePlexPin, buildPlexAuthUrl, getDefaultPlexOptions } from "$lib/server/plex-oauth";
-import { dev } from "$app/environment";
 import { createScopedLogger } from "$lib/logger";
 
 const logger = createScopedLogger("plex-authorize");
@@ -29,6 +28,15 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
     const options = getDefaultPlexOptions(env);
 
+    const publicOrigin = env.ORIGIN || url.origin;
+    const secureCookie = (() => {
+        try {
+            return new URL(publicOrigin).protocol === "https:";
+        } catch {
+            return false;
+        }
+    })();
+
     try {
         const pin = await generatePlexPin(options);
 
@@ -43,14 +51,15 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
         cookies.set("plex_auth_state", JSON.stringify(authData), {
             path: "/",
             httpOnly: true,
-            secure: !dev,
+            // In the monolith we often run over plain HTTP on LAN.
+            // If `secure: true` on HTTP, browsers will drop the cookie and the callback can't find it.
+            secure: secureCookie,
             sameSite: "lax",
             maxAge: 60 * 10 // 10 minutes
         });
 
         // Build the Plex auth URL with forwardUrl pointing to our callback
-        const origin = env.ORIGIN || url.origin;
-        const callbackUrl = `${origin}/api/plex/callback`;
+        const callbackUrl = `${publicOrigin}/api/plex/callback`;
         const plexAuthUrl = buildPlexAuthUrl(options, pin.code, callbackUrl);
 
         redirect(302, plexAuthUrl.toString());
