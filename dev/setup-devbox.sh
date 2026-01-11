@@ -38,6 +38,14 @@ init_ui() {
   LOG_FILE="${LOG_FILE:-/tmp/riven-devbox-setup.$(date +%Y%m%d-%H%M%S).log}"
 }
 
+SUDO_KEEPALIVE_PID=""
+
+cleanup() {
+  if [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill -0 "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1; then
+    kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
+  fi
+}
+
 say() {
   # shellcheck disable=SC2059
   printf "%b\n" "$*" 1>&2
@@ -236,6 +244,29 @@ require_sudo() {
   echo "This script needs root privileges (installing packages), but 'sudo' is not available." >&2
   echo "Run as root or install sudo first." >&2
   exit 1
+}
+
+ensure_sudo_cached() {
+  # Ensure sudo credentials are cached so later spinner/background steps don't
+  # hide an interactive password prompt.
+  if [ -z "${SUDO:-}" ] || [ "$SUDO" != "sudo" ]; then
+    return
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    return
+  fi
+
+  step "Privileges"
+  say "${DIM}This setup needs sudo for package installs and Docker setup.${RESET}"
+  say "${DIM}You'll be prompted for your password once (if needed).${RESET}"
+
+  # Run in foreground so the password prompt is visible.
+  sudo -v
+
+  # Keep sudo alive while the script runs.
+  ( while true; do sudo -n true 2>/dev/null || exit 0; sleep 60; done ) &
+  SUDO_KEEPALIVE_PID=$!
 }
 
 detect_os() {
@@ -515,6 +546,7 @@ compose_up() {
 main() {
   init_ui
   trap on_err ERR
+  trap cleanup EXIT
 
   say "${BOLD}Riven devbox setup${RESET} ${DIM}(this will install Docker + start containers)${RESET}"
   say "${DIM}Log: ${LOG_FILE}${RESET}"
@@ -525,12 +557,22 @@ main() {
   # OS detection early for clearer errors.
   detect_os
   require_sudo
+  ensure_sudo_cached
 
   validate_network
   apt_install_prereqs
   install_docker
   ensure_env_file
   prepare_container_data
+
+  if is_interactive; then
+    if ! prompt_yn "Build + start containers now?" "y"; then
+      ok "Skipping container start"
+      warn "Run later from repo root: docker compose -f docker-compose-dev-monolith.yml up -d --build"
+      return
+    fi
+  fi
+
   compose_up
 
   say ""
