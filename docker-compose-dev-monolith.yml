@@ -50,6 +50,10 @@ services:
       - PLEX_DEB_URL=${PLEX_DEB_URL:-}
       - PLEX_CLAIM=${PLEX_CLAIM:-}
 
+      # Auth provider toggles (frontend Better Auth):
+      # Allow first-time login via Plex OAuth by default for devbox setups.
+      - ENABLE_PLEX_SIGNUP=${ENABLE_PLEX_SIGNUP:-true}
+
       # Optional override: where persistent data is stored inside container.
       - RIVEN_DATA_DIR=/riven/data
 

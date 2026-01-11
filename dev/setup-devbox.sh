@@ -809,6 +809,7 @@ ensure_env_file() {
   local tz media_flavor node_version plex_deb_url plex_claim db_password
   local tz_current media_flavor_current node_version_current
   local ui_port plex_port expose_plex frontend_origin frontend_origin_current
+  local enable_plex_signup
 
   tz_current="$(env_get "$env_path" TZ "$tz_default")"
   media_flavor_current="$(env_get "$env_path" RIVEN_MEDIA_FLAVOR "none")"
@@ -871,6 +872,9 @@ ensure_env_file() {
   plex_deb_url="$(env_get "$env_path" PLEX_DEB_URL "")"
   plex_claim="$(env_get "$env_path" PLEX_CLAIM "")"
 
+  # Allow first-time signup via Plex OAuth by default (devbox-friendly).
+  enable_plex_signup="$(env_get "$env_path" ENABLE_PLEX_SIGNUP "true")"
+
   if [ "$media_flavor" = "plex" ]; then
     say "${DIM}Plex is proprietary; you must supply a direct .deb URL to install it at runtime.${RESET}"
     plex_deb_url="$(maybe_change_value "PLEX_DEB_URL (required for Plex)" "$plex_deb_url" "https://downloads.plex.tv/.../plexmediaserver_*.deb")"
@@ -914,6 +918,10 @@ RIVEN_MEDIA_FLAVOR=$media_flavor
 # If you enable Plex, also expose port 32400 in docker-compose-dev-monolith.yml.
 PLEX_DEB_URL=$plex_deb_url
 PLEX_CLAIM=$plex_claim
+
+# Allow Plex OAuth to create users on first login.
+# Set to false if you want to require admin-created users / existing accounts.
+ENABLE_PLEX_SIGNUP=$enable_plex_signup
 
 # Host port mapping for Plex container port 32400 (only used if Plex is enabled + exposed).
 PLEX_PORT=$plex_port
