@@ -30,6 +30,10 @@ services:
       # Keep env minimal. Most secrets are generated on first boot and persisted under /riven/data/secrets.
       - TZ=${TZ:-UTC}
 
+      # Public URL used by the frontend auth/OAuth flows (used to set ORIGIN inside the container).
+      # Example: http://10.10.101.102:3000
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-}
+
       # DB password must be user-provided (set in .env). This is used to set/rotate
       # the embedded Postgres role password and to build the backend connection string.
       - RIVEN_DB_PASSWORD=${RIVEN_DB_PASSWORD:-}

@@ -808,7 +808,7 @@ ensure_env_file() {
 
   local tz media_flavor node_version plex_deb_url plex_claim db_password
   local tz_current media_flavor_current node_version_current
-  local ui_port plex_port expose_plex
+  local ui_port plex_port expose_plex frontend_origin frontend_origin_current
 
   tz_current="$(env_get "$env_path" TZ "$tz_default")"
   media_flavor_current="$(env_get "$env_path" RIVEN_MEDIA_FLAVOR "none")"
@@ -848,6 +848,23 @@ ensure_env_file() {
   fi
 
   ui_port="$(maybe_change_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")" "3000")"
+
+  # Public URL for auth/OAuth callbacks. Default to localhost, but offer LAN IP as a convenient option.
+  frontend_origin_current="$(env_get "$env_path" FRONTEND_ORIGIN "")"
+  if [ -z "${frontend_origin_current:-}" ]; then
+    frontend_origin_current="http://localhost:${ui_port}"
+  fi
+
+  local lan_ip
+  lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  if [ -n "${lan_ip:-}" ] && [ "${lan_ip}" != "127.0.0.1" ]; then
+    if is_interactive && prompt_yn "Set FRONTEND_ORIGIN for LAN access (OAuth callbacks)?" "y"; then
+      frontend_origin_current="http://${lan_ip}:${ui_port}"
+    fi
+  fi
+
+  frontend_origin="$(maybe_change_value "FRONTEND_ORIGIN (public URL for auth/OAuth)" "$frontend_origin_current" "http://localhost:${ui_port}")"
+
   plex_port="$(env_get "$env_path" PLEX_PORT "32400")"
   expose_plex="$(env_get "$env_path" PLEX_EXPOSE_PORT "n")"
 
@@ -883,6 +900,10 @@ RIVEN_DB_PASSWORD=$db_password
 
 # Host port mapping for the UI container port 3000.
 RIVEN_UI_PORT=$ui_port
+
+# Public URL used by the frontend auth/OAuth flows (Better Auth baseURL + allowed origin).
+# IMPORTANT: set this to the URL you use in your browser (e.g. http://10.10.101.102:3000)
+FRONTEND_ORIGIN=$frontend_origin
 
 # Monolith feature selection:
 # - none (default)
