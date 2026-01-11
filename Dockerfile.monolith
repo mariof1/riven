@@ -69,6 +69,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     postgresql \
     postgresql-contrib \
     tini \
+  util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 24 runtime (official tarball)

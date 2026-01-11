@@ -245,9 +245,9 @@ start_backend() {
   # Backend API key used by frontend to talk to backend.
   export API_KEY="${RIVEN_API_KEY}"
 
-  /riven/.venv/bin/python /riven/src/main.py \
-    --host 127.0.0.1 --port 8080 \
-    >/dev/null 2>&1 &
+  # Backend binds 0.0.0.0 by default; this is still "internal-only" as long as we
+  # do not publish :8080 from the container.
+  /riven/.venv/bin/python /riven/src/main.py --port 8080 >/dev/null 2>&1 &
   BACKEND_PID=$!
   ok "Backend started"
 }
