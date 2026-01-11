@@ -51,6 +51,119 @@ step() {
   say "${BOLD}${BLUE}==>${RESET} ${BOLD}$*${RESET}"
 }
 
+is_interactive() {
+  is_tty && [ -r /dev/tty ]
+}
+
+prompt() {
+  # Usage: prompt "Question" "default"  -> prints answer
+  local question="$1"
+  local default_value="$2"
+
+  if ! is_interactive; then
+    printf "%s" "$default_value"
+    return
+  fi
+
+  local answer
+  read -r -p "${question} [${default_value}]: " answer </dev/tty || true
+  if [ -z "${answer:-}" ]; then
+    answer="$default_value"
+  fi
+  printf "%s" "$answer"
+}
+
+prompt_yn() {
+  # Usage: prompt_yn "Question" "y"|"n" -> returns 0 for yes, 1 for no
+  local question="$1"
+  local default_yn="$2"
+  local suffix
+  local answer
+
+  if ! is_interactive; then
+    [ "$default_yn" = "y" ]
+    return
+  fi
+
+  if [ "$default_yn" = "y" ]; then
+    suffix="Y/n"
+  else
+    suffix="y/N"
+  fi
+
+  while true; do
+    read -r -p "${question} [${suffix}]: " answer </dev/tty || true
+    answer="${answer:-}"
+    if [ -z "$answer" ]; then
+      [ "$default_yn" = "y" ]
+      return
+    fi
+    case "$answer" in
+      y|Y|yes|YES) return 0 ;;
+      n|N|no|NO) return 1 ;;
+      *) say "${YELLOW}•${RESET} Please answer y/n." ;;
+    esac
+  done
+}
+
+is_valid_port() {
+  local p="$1"
+  [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -ge 1 ] && [ "$p" -le 65535 ]
+}
+
+prompt_port() {
+  # Usage: prompt_port "Question" default
+  local question="$1"
+  local default_value="$2"
+  local answer
+
+  while true; do
+    answer="$(prompt "$question" "$default_value")"
+    if is_valid_port "$answer"; then
+      printf "%s" "$answer"
+      return
+    fi
+    warn "Invalid port '$answer' (must be 1-65535)"
+    if ! is_interactive; then
+      printf "%s" "$default_value"
+      return
+    fi
+  done
+}
+
+env_get() {
+  # Usage: env_get .env KEY default
+  local file="$1" key="$2" default_value="$3"
+  if [ -f "$file" ] && grep -qE "^${key}=" "$file"; then
+    awk -F= -v k="$key" '$1==k {sub(/^[^=]*=/, ""); print; exit}' "$file"
+  else
+    printf "%s" "$default_value"
+  fi
+}
+
+write_compose_override() {
+  # Writes a tiny compose override with the desired host port mappings.
+  # We keep this outside the repo so it doesn't need gitignore changes.
+  local override_path="$1"
+  local ui_port="$2"
+  local media_flavor="$3"
+  local plex_port="$4"
+  local expose_plex="$5"
+
+  cat >"$override_path" <<EOF
+services:
+  riven_monolith:
+    ports:
+      - "${ui_port}:3000"
+EOF
+
+  if [ "$media_flavor" = "plex" ] && [ "$expose_plex" = "y" ]; then
+    cat >>"$override_path" <<EOF
+      - "${plex_port}:32400"
+EOF
+  fi
+}
+
 spinner() {
   # Usage: spinner "Message" cmd arg...
   local message="$1"; shift
@@ -254,37 +367,103 @@ docker_cmd() {
 
 ensure_env_file() {
   local env_path=".env"
-  if [ -f "$env_path" ]; then
-    step "Environment (.env)"
-    ok "Using existing $env_path"
-    return
-  fi
 
   step "Environment (.env)"
-  say "${DIM}Creating $env_path with generated secrets…${RESET}"
 
-  local tz
-  tz="UTC"
+  if [ -f "$env_path" ]; then
+    ok "Found existing $env_path"
+    if is_interactive; then
+      if ! prompt_yn "Update $env_path interactively now?" "y"; then
+        ok "Keeping existing $env_path"
+        return
+      fi
+    else
+      ok "Using existing $env_path"
+      return
+    fi
+  else
+    say "${DIM}Creating $env_path…${RESET}"
+  fi
+
+  local tz_default
+  if [ -f /etc/timezone ]; then
+    tz_default="$(cat /etc/timezone 2>/dev/null || true)"
+  else
+    tz_default="UTC"
+  fi
+  tz_default="${tz_default:-UTC}"
+
+  local tz media_flavor node_version plex_deb_url plex_claim
+  tz="$(prompt "Timezone (TZ)" "$(env_get "$env_path" TZ "$tz_default")")"
+
+  # Minimal feature selection for now.
+  media_flavor="$(prompt "Media flavor (none|plex)" "$(env_get "$env_path" RIVEN_MEDIA_FLAVOR "none")")"
+  case "$media_flavor" in
+    none|plex) : ;;
+    *)
+      warn "Unknown media flavor '$media_flavor'; defaulting to none"
+      media_flavor="none"
+      ;;
+  esac
+
+  node_version="$(prompt "Node runtime version (NODE_VERSION)" "$(env_get "$env_path" NODE_VERSION "24.0.0")")"
+
+  local ui_port plex_port expose_plex
+  ui_port="$(prompt_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")")"
+  plex_port="$(env_get "$env_path" PLEX_PORT "32400")"
+  expose_plex="n"
+
+  plex_deb_url="$(env_get "$env_path" PLEX_DEB_URL "")"
+  plex_claim="$(env_get "$env_path" PLEX_CLAIM "")"
+
+  if [ "$media_flavor" = "plex" ]; then
+    say "${DIM}Plex is proprietary; you must supply a direct .deb URL to install it at runtime.${RESET}"
+    plex_deb_url="$(prompt "PLEX_DEB_URL (required for Plex)" "${plex_deb_url:-https://downloads.plex.tv/.../plexmediaserver_*.deb}")"
+    plex_claim="$(prompt "PLEX_CLAIM (optional)" "${plex_claim:-}")"
+
+    if prompt_yn "Expose Plex port on the host?" "y"; then
+      expose_plex="y"
+      plex_port="$(prompt_port "Host port for Plex" "$(env_get "$env_path" PLEX_PORT "32400")")"
+    else
+      expose_plex="n"
+    fi
+  fi
 
   cat > "$env_path" <<EOF
 # Local devbox env (auto-generated). Safe to edit.
 TZ=$tz
 
+# Host port mapping for the UI container port 3000.
+RIVEN_UI_PORT=$ui_port
+
 # Monolith feature selection:
 # - none (default)
 # - plex
-RIVEN_MEDIA_FLAVOR=none
+RIVEN_MEDIA_FLAVOR=$media_flavor
 
 # Optional: enable Plex (proprietary) by providing a .deb URL + claim token.
-# PLEX_DEB_URL=https://downloads.plex.tv/.../plexmediaserver_*.deb
-# PLEX_CLAIM=claim-xxxx
-# (Other Plex settings can be added as PLEX_* vars.)
+# If you enable Plex, also expose port 32400 in docker-compose-dev-monolith.yml.
+PLEX_DEB_URL=$plex_deb_url
+PLEX_CLAIM=$plex_claim
 
-# Optional: pin Node tarball version used in the monolith build.
-# NODE_VERSION=24.0.0
+# Host port mapping for Plex container port 32400 (only used if Plex is enabled + exposed).
+PLEX_PORT=$plex_port
+PLEX_EXPOSE_PORT=$expose_plex
+
+# Pin Node tarball version used in the monolith final stage.
+NODE_VERSION=$node_version
 EOF
 
   ok "Wrote $env_path (gitignored via .env*)."
+
+  # Offer to regenerate secrets that are persisted under ./container_data/monolith.
+  # These include the backend API key used by the frontend.
+  if is_interactive; then
+    if prompt_yn "Regenerate monolith secrets (API key/auth/db password)?" "n"; then
+      rm -f container_data/monolith/secrets/monolith.env 2>/dev/null || true
+      ok "Deleted container_data/monolith/secrets/monolith.env (will be re-generated on next start)"
+    fi
+  fi
 }
 
 prepare_container_data() {
@@ -310,14 +489,24 @@ compose_up() {
   local DOCKER
   DOCKER="$(docker_cmd)"
 
+  local ui_port media_flavor plex_port expose_plex
+  ui_port="$(env_get .env RIVEN_UI_PORT 3000)"
+  media_flavor="$(env_get .env RIVEN_MEDIA_FLAVOR none)"
+  plex_port="$(env_get .env PLEX_PORT 32400)"
+  expose_plex="$(env_get .env PLEX_EXPOSE_PORT n)"
+
+  local override_file
+  override_file="${COMPOSE_OVERRIDE_FILE:-/tmp/riven-dev-monolith.override.yml}"
+  write_compose_override "$override_file" "$ui_port" "$media_flavor" "$plex_port" "$expose_plex"
+
   step "Build + start containers"
   spinner "docker compose up (build + start)" \
-    $DOCKER compose -f "$COMPOSE_FILE_DEFAULT" up -d --build
+    $DOCKER compose -f "$COMPOSE_FILE_DEFAULT" -f "$override_file" up -d --build
 
   step "Smoke test"
   if need_cmd curl; then
-    spinner "Frontend reachable" bash -lc "curl -fsS -o /dev/null -w '%{http_code}\n' -L http://localhost:3000/ | grep -qE '^(200|3..)$'"
-    ok "OK: http://localhost:3000"
+    spinner "Frontend reachable" bash -lc "curl -fsS -o /dev/null -w '%{http_code}\n' -L http://localhost:${ui_port}/ | grep -qE '^(200|3..)$'"
+    ok "OK: http://localhost:${ui_port}"
   else
     warn "curl not found; skipping HTTP checks."
   fi

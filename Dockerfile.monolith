@@ -28,6 +28,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     curl \
     gcc \
     git \
+  libfuse3-dev \
     libffi-dev \
     libxml2-dev \
     libxslt1-dev \

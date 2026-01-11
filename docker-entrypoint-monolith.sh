@@ -216,15 +216,11 @@ ensure_db_role_and_db() {
   user_ident="\"$(printf "%s" "$DB_USER" | sed 's/"/""/g')\""
   db_ident="\"$(printf "%s" "$DB_NAME" | sed 's/"/""/g')\""
 
-  su -s /bin/bash postgres -c "'$pg_bin/psql' -v ON_ERROR_STOP=1 --username=postgres --dbname=postgres -c \"DO \\\$\\$\
-BEGIN\
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${user_lit}') THEN\
-    EXECUTE 'CREATE ROLE ${user_ident} LOGIN PASSWORD ''''${pass_lit}''''';\
-  ELSE\
-    EXECUTE 'ALTER ROLE ${user_ident} WITH PASSWORD ''''${pass_lit}''''';\
-  END IF;\
-END\
-\\$\\$;\"" >/dev/null
+  if su -s /bin/bash postgres -c "'$pg_bin/psql' --username=postgres --dbname=postgres -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${user_lit}'\"" | grep -q 1; then
+    su -s /bin/bash postgres -c "'$pg_bin/psql' -v ON_ERROR_STOP=1 --username=postgres --dbname=postgres -c \"ALTER ROLE ${user_ident} WITH PASSWORD '${pass_lit}';\"" >/dev/null
+  else
+    su -s /bin/bash postgres -c "'$pg_bin/psql' -v ON_ERROR_STOP=1 --username=postgres --dbname=postgres -c \"CREATE ROLE ${user_ident} LOGIN PASSWORD '${pass_lit}';\"" >/dev/null
+  fi
 
   if ! su -s /bin/bash postgres -c "'$pg_bin/psql' --username=postgres --dbname=postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='${db_lit}'\"" | grep -q 1; then
     su -s /bin/bash postgres -c "'$pg_bin/psql' -v ON_ERROR_STOP=1 --username=postgres --dbname=postgres -c \"CREATE DATABASE ${db_ident} OWNER ${user_ident};\"" >/dev/null
@@ -247,9 +243,23 @@ start_backend() {
 
   # Backend binds 0.0.0.0 by default; this is still "internal-only" as long as we
   # do not publish :8080 from the container.
-  /riven/.venv/bin/python /riven/src/main.py --port 8080 >/dev/null 2>&1 &
+  /riven/.venv/bin/python /riven/src/main.py --port 8080 &
   BACKEND_PID=$!
   ok "Backend started"
+}
+
+wait_for_backend() {
+  say "${DIM}Waiting for backend…${RESET}"
+
+  for _ in $(seq 1 60); do
+    if curl -fsS http://127.0.0.1:8080/openapi.json >/dev/null 2>&1; then
+      ok "Backend ready"
+      return
+    fi
+    sleep 1
+  done
+
+  warn "Backend did not become ready in time"
 }
 
 start_frontend() {
@@ -261,8 +271,10 @@ start_frontend() {
   export AUTH_SECRET="${FRONTEND_AUTH_SECRET}"
   export DATABASE_URL="${FRONTEND_DATABASE_URL:-$FRONTEND_DATA_DIR/riven.db}"
 
-  node /riven/frontend/build \
-    >/dev/null 2>&1 &
+  (
+    cd /riven/frontend
+    node build
+  ) &
   FRONTEND_PID=$!
   ok "Frontend started"
 }
@@ -320,7 +332,7 @@ install_plex_if_needed() {
   # Pass-through any user-provided Plex env vars.
   # (They can set things like PLEX_CLAIM, ADVERTISE_IP, etc.)
 
-  su -s /bin/bash plex -c "'$plex_bin'" >/dev/null 2>&1 &
+  su -s /bin/bash plex -c "'$plex_bin'" &
   PLEX_PID=$!
   ok "Plex started"
 }
@@ -350,6 +362,7 @@ main() {
   ensure_db_role_and_db
 
   start_backend
+  wait_for_backend
   start_frontend
 
   install_plex_if_needed
