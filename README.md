@@ -122,39 +122,15 @@ Plex libraries that are currently required to have sections:
 
 ### Troubleshooting: Plex shows empty /mount after Riven restart
 
-If Plex’s library path appears empty inside the Plex container after restarting Riven/RivenVFS, it’s almost always mount propagation and/or timing. Use the steps below to diagnose and fix without restarting Plex.
+If Plex’s library path appears empty after restarting Riven/RivenVFS, it’s usually timing (Plex scans before the FUSE mount is ready) or a stale mount.
 
-1) Verify the host path is shared (required)
+In the **single-container monolith** setup, mount propagation between containers is not a factor because Plex (when enabled) runs in the same container/mount namespace.
 
-- Mark your host mount directory as a shared bind mount (one-time per boot):
+1) Ensure Riven mounts to the container path
 
-```bash
-sudo mkdir -p /path/to/riven/mount
-sudo mount --bind /path/to/riven/mount /path/to/riven/mount
-sudo mount --make-rshared /path/to/riven/mount
-findmnt -T /path/to/riven/mount -o TARGET,PROPAGATION  # expect: shared or rshared
-```
+- In Riven settings, set the Filesystem mount path to the container path (typically `/mount`), not the host path. Plex should also point its libraries at `/mount/...`.
 
-2) Verify propagation inside the Plex container
-
-- The container must also receive mount events recursively (rslave or rshared):
-
-```bash
-docker exec -it plex sh -c 'findmnt -T /mount -o TARGET,PROPAGATION,OPTIONS,FSTYPE'
-# PROPAGATION should be rslave or rshared, FSTYPE should show fuse when RivenVFS is mounted
-```
-
-- In docker-compose for Plex, ensure the bind includes mount propagation (and SELinux label if needed):
-
-```yaml
-  - /path/to/riven/mount:/mount:rslave,z
-```
-
-3) Ensure the path Riven mounts to is the container path
-
-- In Riven settings, set the Filesystem mount path to the container path (typically `/mount`), not the host path. Both Riven (if containerized) and Plex should refer to the same in-container path for their libraries (e.g., `/mount/movies`, `/mount/shows`).
-
-4) Clear a stale FUSE mount (after crashes)
+2) Clear a stale FUSE mount (after crashes)
 
 - If a previous FUSE instance didn’t unmount cleanly on the host, a stale mount can block remounts.
 
@@ -163,9 +139,9 @@ sudo fusermount -uz /path/to/riven/mount || sudo umount -l /path/to/riven/mount
 # then start Riven again
 ```
 
-6) Expected behavior during restart window
+3) Expected behavior during restart window
 
-- When Riven stops, the FUSE mount unmounts and `/mount` may briefly appear empty inside the container; it will become FUSE again when Riven remounts. With proper propagation (host rshared + container rslave/rshared) and startup order, Plex should see the content return automatically without a restart. Enabling Plex’s “Automatically scan my library” can also help it pick up changes.
+- When Riven stops, the FUSE mount unmounts and `/mount` may briefly appear empty; it will become FUSE again when Riven remounts. Enabling Plex’s “Automatically scan my library” can help it pick up changes.
 
 ## RivenVFS and Caching
 

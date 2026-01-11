@@ -1,77 +1,56 @@
 services:
-    # Frontend container also hosts an embedded Postgres instance for Riven.
-    riven_frontend:
-        # Use the upstream image if it contains embedded Postgres, or build from ./frontend.
-        image: spoked/riven-frontend:latest
-        container_name: riven-frontend
-        restart: unless-stopped
-        tty: true
-        environment:
-            - TZ=${TZ:-Etc/UTC}
-            - ORIGIN=http://localhost:3000
-            # Server-side calls from the frontend container to the backend container.
-            - BACKEND_URL=http://riven:8080
-            # Must match the backend API_KEY.
-            - BACKEND_API_KEY=${RIVEN_API_KEY:-dev_only_change_me_1234567890123}
-            # Replace for any real deployment (must be >= 32 chars).
-            - AUTH_SECRET=${FRONTEND_AUTH_SECRET:-dev_auth_secret_change_me_123456}
-            # Embedded Postgres config (used by backend)
-            - PGDATA=/riven/data/postgres
-            - POSTGRES_USER=postgres
-            - POSTGRES_PASSWORD=postgres
-            - POSTGRES_DB=riven
-        ports:
-            - 3000:3000
-        volumes:
-            - /path/to/riven/frontend:/riven/data
-        healthcheck:
-            test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U postgres"]
-            interval: 10s
-            timeout: 5s
-            retries: 10
-
+    # Single-container monolith (backend + frontend + embedded Postgres)
+    #
+    # Notes:
+    # - Frontend UI is exposed on http://localhost:3000
+    # - Backend API is internal-only (not published to host)
+    # - Postgres runs inside the same container
+    # - Mount propagation is handled inside the container (no host :rshared required)
     riven:
-        image: spoked/riven:latest
+        # For self-host, build from this repo.
+        build:
+            context: .
+            dockerfile: Dockerfile.monolith
+            args:
+                NODE_VERSION: ${NODE_VERSION:-24.0.0}
+        # Alternatively, if you publish a monolith image, replace the build with:
+        # image: yourname/riven-monolith:latest
+        image: riven-monolith:local
         container_name: riven
         restart: unless-stopped
-        ports:
-            - "8080:8080"
         tty: true
+        shm_size: 1024m
+
+        ports:
+            - "3000:3000"
+            # Optional Plex (enable first via env):
+            # - "32400:32400"
+
+        environment:
+            # Minimal env. Secrets are generated on first boot and persisted under /riven/data.
+            - TZ=${TZ:-Etc/UTC}
+
+            # Media server selection:
+            # - none (default)
+            # - plex
+            - RIVEN_MEDIA_FLAVOR=${RIVEN_MEDIA_FLAVOR:-none}
+
+            # Plex (optional): provide any env vars Plex needs.
+            # Plex is proprietary; this container can install it at runtime if you set:
+            # - PLEX_DEB_URL (direct .deb URL)
+            # - PLEX_CLAIM (optional claim token)
+            - PLEX_DEB_URL=${PLEX_DEB_URL:-}
+            - PLEX_CLAIM=${PLEX_CLAIM:-}
+
+        devices:
+            - /dev/fuse
         cap_add:
             - SYS_ADMIN
         security_opt:
             - apparmor:unconfined
-        shm_size: 1024m
-        devices:
-            - /dev/fuse
-        environment:
-            - PUID=${PUID:-1000}
-            - PGID=${PGID:-1000}
-            - TZ=${TZ:-America/New_York}
-            - RIVEN_FORCE_ENV=true
-            # Must match the frontend's embedded Postgres credentials.
-            - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_frontend:5432/riven
-            # Must match the frontend's BACKEND_API_KEY.
-            - API_KEY=${RIVEN_API_KEY:-dev_only_change_me_1234567890123}
-        healthcheck:
-            test: curl -s http://localhost:8080 >/dev/null || exit 1
-            interval: 30s
-            timeout: 10s
-            retries: 10
-        volumes:
-            - /path/to/riven/data:/riven/data
-            - /path/to/riven/mount:/mount:rshared,z
-        depends_on:
-            riven_frontend:
-                condition: service_healthy
 
-    jellyfin:
-        image: jellyfin/jellyfin
-        container_name: jellyfin
-        user: 1000:1000
-        restart: unless-stopped
-        ports:
-        - "8096:8096"
         volumes:
-        - /path/to/jellyfin/config:/config
-        - /path/to/riven/mount:/mount:rslave,z
+            # Persistent data (secrets, DB, logs, caches)
+            - /path/to/riven/data:/riven/data
+            # Mount root used by RivenVFS (no host propagation flags required)
+            - /path/to/riven/mount:/mount
