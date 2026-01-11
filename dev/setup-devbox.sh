@@ -438,6 +438,16 @@ spinner() {
   fi
 }
 
+dump_monolith_logs_tail() {
+  # Best-effort helper for troubleshooting when the stack starts but UI isn't reachable.
+  local name
+  name="${1:-riven-monolith}"
+  if need_cmd docker; then
+    say "${DIM}--- recent container logs (${name}) ---${RESET}"
+    docker logs --tail=200 "$name" 2>&1 | cat 1>&2 || true
+  fi
+}
+
 run_quiet() {
   # Runs a command, appending stdout/stderr to LOG_FILE.
   # Do not echo the command itself (avoid spam), but keep it in the log.
@@ -962,8 +972,27 @@ compose_up() {
 
   step "Smoke test"
   if need_cmd curl; then
-    spinner "Frontend reachable" bash -lc "curl -fsS -o /dev/null -w '%{http_code}\n' -L http://localhost:${ui_port}/ | grep -qE '^(200|3..)$'"
-    ok "OK: http://localhost:${ui_port}"
+    set +e
+    spinner "Frontend reachable" bash -lc '
+      set -e
+      url="http://localhost:'"${ui_port}"'/"
+      for i in $(seq 1 60); do
+        code="$(curl -fsS -o /dev/null -w "%{http_code}" -L "$url" 2>/dev/null || true)"
+        if echo "$code" | grep -qE "^(200|3..)$"; then
+          exit 0
+        fi
+        sleep 2
+      done
+      exit 1
+    '
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ]; then
+      ok "OK: http://localhost:${ui_port}"
+    else
+      dump_monolith_logs_tail riven-monolith
+      exit "$rc"
+    fi
   else
     warn "curl not found; skipping HTTP checks."
   fi
