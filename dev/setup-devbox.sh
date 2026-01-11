@@ -41,6 +41,7 @@ init_ui() {
 SUDO_KEEPALIVE_PID=""
 
 AUTO_START_CONTAINERS="y"
+AUTO_CONTINUE="y"
 
 cleanup() {
   if [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill -0 "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1; then
@@ -112,6 +113,62 @@ prompt_secret() {
   fi
 
   printf "%s" "$answer"
+}
+
+maybe_change_value() {
+  # Usage: maybe_change_value "Label" "current" "default" -> prints chosen value
+  local label="$1"
+  local current_value="$2"
+  local default_value="$3"
+
+  if ! is_interactive; then
+    if [ -n "${current_value:-}" ]; then
+      printf "%s" "$current_value"
+    else
+      printf "%s" "$default_value"
+    fi
+    return
+  fi
+
+  local shown
+  shown="$current_value"
+  if [ -z "${shown:-}" ]; then
+    shown="(empty)"
+  fi
+
+  if prompt_yn "Change ${label}? (currently: ${shown})" "n"; then
+    printf "%s" "$(prompt "${label}" "${current_value:-$default_value}")"
+  else
+    printf "%s" "$current_value"
+  fi
+}
+
+maybe_change_port() {
+  # Usage: maybe_change_port "Label" "current" "default" -> prints chosen port
+  local label="$1"
+  local current_value="$2"
+  local default_value="$3"
+
+  if ! is_interactive; then
+    if [ -n "${current_value:-}" ]; then
+      printf "%s" "$current_value"
+    else
+      printf "%s" "$default_value"
+    fi
+    return
+  fi
+
+  local shown
+  shown="$current_value"
+  if [ -z "${shown:-}" ]; then
+    shown="(empty)"
+  fi
+
+  if prompt_yn "Change ${label}? (currently: ${shown})" "n"; then
+    printf "%s" "$(prompt_port "${label}" "${current_value:-$default_value}")"
+  else
+    printf "%s" "$current_value"
+  fi
 }
 
 prompt_yn() {
@@ -443,7 +500,7 @@ ensure_env_file() {
   if [ -f "$env_path" ]; then
     ok "Found existing $env_path"
     if is_interactive; then
-      if ! prompt_yn "Update $env_path interactively now?" "y"; then
+      if ! prompt_yn "Edit $env_path now?" "y"; then
         ok "Keeping existing $env_path"
         return
       fi
@@ -464,10 +521,17 @@ ensure_env_file() {
   tz_default="${tz_default:-UTC}"
 
   local tz media_flavor node_version plex_deb_url plex_claim db_password
-  tz="$(prompt "Timezone (TZ)" "$(env_get "$env_path" TZ "$tz_default")")"
+  local tz_current media_flavor_current node_version_current
+  local ui_port plex_port expose_plex
+
+  tz_current="$(env_get "$env_path" TZ "$tz_default")"
+  media_flavor_current="$(env_get "$env_path" RIVEN_MEDIA_FLAVOR "none")"
+  node_version_current="$(env_get "$env_path" NODE_VERSION "24.0.0")"
+
+  tz="$(maybe_change_value "Timezone (TZ)" "$tz_current" "$tz_default")"
 
   # Minimal feature selection for now.
-  media_flavor="$(prompt "Media flavor (none|plex)" "$(env_get "$env_path" RIVEN_MEDIA_FLAVOR "none")")"
+  media_flavor="$(maybe_change_value "Media flavor (none|plex)" "$media_flavor_current" "none")"
   case "$media_flavor" in
     none|plex) : ;;
     *)
@@ -476,29 +540,46 @@ ensure_env_file() {
       ;;
   esac
 
-  node_version="$(prompt "Node runtime version (NODE_VERSION)" "$(env_get "$env_path" NODE_VERSION "24.0.0")")"
+  node_version="$(maybe_change_value "Node runtime version (NODE_VERSION)" "$node_version_current" "24.0.0")"
 
-  db_password="$(prompt_secret "RIVEN_DB_PASSWORD (embedded Postgres role password)" "$(env_get "$env_path" RIVEN_DB_PASSWORD "")")"
+  db_password="$(env_get "$env_path" RIVEN_DB_PASSWORD "")"
+  if is_interactive; then
+    local db_shown
+    db_shown="(set)"
+    if [ -z "${db_password:-}" ]; then
+      db_shown="(empty)"
+    fi
+    if prompt_yn "Change RIVEN_DB_PASSWORD? (currently: ${db_shown})" "n"; then
+      db_password="$(prompt_secret "RIVEN_DB_PASSWORD (embedded Postgres role password)" "")"
+    fi
+  fi
 
-  local ui_port plex_port expose_plex
-  ui_port="$(prompt_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")")"
+  ui_port="$(maybe_change_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")" "3000")"
   plex_port="$(env_get "$env_path" PLEX_PORT "32400")"
-  expose_plex="n"
+  expose_plex="$(env_get "$env_path" PLEX_EXPOSE_PORT "n")"
 
   plex_deb_url="$(env_get "$env_path" PLEX_DEB_URL "")"
   plex_claim="$(env_get "$env_path" PLEX_CLAIM "")"
 
   if [ "$media_flavor" = "plex" ]; then
     say "${DIM}Plex is proprietary; you must supply a direct .deb URL to install it at runtime.${RESET}"
-    plex_deb_url="$(prompt "PLEX_DEB_URL (required for Plex)" "${plex_deb_url:-https://downloads.plex.tv/.../plexmediaserver_*.deb}")"
-    plex_claim="$(prompt "PLEX_CLAIM (optional)" "${plex_claim:-}")"
+    plex_deb_url="$(maybe_change_value "PLEX_DEB_URL (required for Plex)" "$plex_deb_url" "https://downloads.plex.tv/.../plexmediaserver_*.deb")"
+    plex_claim="$(maybe_change_value "PLEX_CLAIM (optional)" "$plex_claim" "")"
 
-    if prompt_yn "Expose Plex port on the host?" "y"; then
-      expose_plex="y"
-      plex_port="$(prompt_port "Host port for Plex" "$(env_get "$env_path" PLEX_PORT "32400")")"
+    if is_interactive; then
+      if prompt_yn "Expose Plex port on the host?" "y"; then
+        expose_plex="y"
+        plex_port="$(maybe_change_port "Host port for Plex" "$(env_get "$env_path" PLEX_PORT "32400")" "32400")"
+      else
+        expose_plex="n"
+      fi
     else
-      expose_plex="n"
+      expose_plex="${expose_plex:-n}"
     fi
+  fi
+
+  if [ -z "${db_password:-}" ]; then
+    warn "RIVEN_DB_PASSWORD is empty; container start will fail until you set it."
   fi
 
   cat > "$env_path" <<EOF
@@ -561,7 +642,12 @@ confirm_run_unattended() {
   say "${DIM}- Docker install (if needed)${RESET}"
   say "${DIM}- build + start containers${RESET}"
 
-  if ! prompt_yn "Continue?" "y"; then
+  if ! prompt_yn "Continue with setup steps now?" "y"; then
+    AUTO_CONTINUE="n"
+    return
+  fi
+
+  if ! prompt_yn "Start containers at the end?" "y"; then
     AUTO_START_CONTAINERS="n"
   fi
 }
@@ -633,7 +719,7 @@ main() {
   maybe_regenerate_monolith_secrets
   confirm_run_unattended
 
-  if [ "${AUTO_START_CONTAINERS}" != "y" ]; then
+  if [ "${AUTO_CONTINUE}" != "y" ]; then
     ok "Stopped before installing/building/starting"
     warn "Re-run any time: ./dev/setup-devbox.sh"
     return
@@ -644,7 +730,12 @@ main() {
   apt_install_prereqs
   install_docker
   prepare_container_data
-  compose_up
+  if [ "${AUTO_START_CONTAINERS}" = "y" ]; then
+    compose_up
+  else
+    ok "Skipping container start"
+    warn "Run later from repo root: docker compose -f docker-compose-dev-monolith.yml up -d --build"
+  fi
 
   say ""
   ok "Done"
