@@ -596,26 +596,21 @@ ensure_env_file() {
 
   db_password="$(env_get "$env_path" RIVEN_DB_PASSWORD "")"
   if is_interactive; then
-    local db_shown
-    db_shown="(set)"
     if [ -z "${db_password:-}" ]; then
-      db_shown="(empty)"
-    fi
-    if prompt_yn "Change RIVEN_DB_PASSWORD? (currently: ${db_shown})" "n"; then
-      db_password="$(prompt_secret "RIVEN_DB_PASSWORD (embedded Postgres role password)" "")"
+      warn "RIVEN_DB_PASSWORD is required to start the monolith"
+      db_password="$(prompt_secret "Enter RIVEN_DB_PASSWORD" "")"
+    else
+      if prompt_yn "Change RIVEN_DB_PASSWORD? (currently: (set))" "n"; then
+        db_password="$(prompt_secret "Enter new RIVEN_DB_PASSWORD" "")"
+      fi
     fi
   fi
 
   # Ensure DB password is set so the stack can start.
   if [ -z "${db_password:-}" ]; then
-    if is_interactive; then
-      warn "RIVEN_DB_PASSWORD is required to start the monolith"
-      db_password="$(prompt_secret "RIVEN_DB_PASSWORD (required)" "")"
-    else
-      fail "RIVEN_DB_PASSWORD is not set in $env_path"
-      fail "Set it and re-run (required to start the monolith)."
-      exit 1
-    fi
+    fail "RIVEN_DB_PASSWORD is not set in $env_path"
+    fail "Set it and re-run (required to start the monolith)."
+    exit 1
   fi
 
   ui_port="$(maybe_change_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")" "3000")"
