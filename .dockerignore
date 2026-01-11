@@ -33,6 +33,9 @@ __pycache__
 data
 test*
 
+# Local dev/runtime data (bind-mounted by docker-compose)
+container_data/
+
 # Jupyter Notebooks
 .ipynb_checkpoints
 

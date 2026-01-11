@@ -43,6 +43,7 @@ We are constantly adding features and improvements as we go along and squashing 
 - [Self Hosted](#self-hosted)
   - [Installation](#installation)
   - [Plex](#plex)
+- [Dev Box Quickstart](#dev-box-quickstart)
 - [RivenVFS and Caching](#rivenvfs-and-caching)
 - [Contributing](#contributing)
 - [License](#license)
@@ -57,7 +58,27 @@ We are constantly adding features and improvements as we go along and squashing 
 
 2) Copy over the contents of [docker-compose.yml](docker-compose.yml) to your `docker-compose.yml` file.
 
-- Modify the PATHS in the `docker-compose.yml` file volumes to match your environment. When adding /mount to any container, make sure to add `:rshared,z` to the end of the volume mount. Like this:
+> [!IMPORTANT]
+> This `docker-compose.yml` runs Postgres **inside the frontend container** (embedded Postgres) so there is **no separate DB container**.
+> The frontend data volume you configure below will store both the frontend's own data and the embedded Postgres data directory.
+>
+> If you use prebuilt images, the frontend image must include embedded Postgres support. If it doesn't, build your own frontend image from this repo's [frontend/Dockerfile](frontend/Dockerfile) or use the local dev compose file [docker-compose-dev-full.yml](docker-compose-dev-full.yml).
+
+3) Modify the PATHS in the `docker-compose.yml` file volumes to match your environment:
+
+- Backend persistent data:
+
+```yaml
+  - /path/to/riven/data:/riven/data
+```
+
+- Frontend persistent data (also stores embedded Postgres under `/riven/data/postgres`):
+
+```yaml
+  - /path/to/riven/frontend:/riven/data
+```
+
+When adding `/mount` to any container, make sure to add `:rshared,z` to the end of the volume mount. Like this:
 
 ```yaml
 volumes:
@@ -65,7 +86,19 @@ volumes:
   - /path/to/riven/mount:/mount:rshared,z
 ```
 
-3) Make your mount directory a bind mount and mark it shared (run once per boot):
+4) Set secrets / keys (recommended):
+
+- `RIVEN_API_KEY` must match between backend + frontend.
+- `FRONTEND_AUTH_SECRET` must be at least 32 characters.
+
+Example:
+
+```bash
+export RIVEN_API_KEY='dev_only_change_me_1234567890123'
+export FRONTEND_AUTH_SECRET='dev_auth_secret_change_me_123456'
+```
+
+5) Make your mount directory a bind mount and mark it shared (run once per boot):
 
 ```bash
 sudo mkdir -p /path/to/riven/mount
@@ -77,6 +110,12 @@ sudo mount --make-rshared /path/to/riven/mount
 
 ```bash
 findmnt -T /path/to/riven/mount -o TARGET,PROPAGATION  # expect: shared or rshared
+```
+
+6) Start the containers:
+
+```bash
+docker compose up -d
 ```
 
 > [!TIP]
@@ -178,6 +217,32 @@ sudo fusermount -uz /path/to/riven/mount || sudo umount -l /path/to/riven/mount
 - When Riven stops, the FUSE mount unmounts and `/mount` may briefly appear empty inside the container; it will become FUSE again when Riven remounts. With proper propagation (host rshared + container rslave/rshared) and startup order, Plex should see the content return automatically without a restart. Enabling Plex’s “Automatically scan my library” can also help it pick up changes.
 
 ## RivenVFS and Caching
+
+---
+
+## Dev Box Quickstart
+
+Goal: on a fresh Debian/Ubuntu server, install prerequisites, build images, and start the full dev stack.
+
+### Option A: clone into `riven-dev` (recommended)
+
+```bash
+cd /home/landmin
+git clone --branch dev https://github.com/mariof1/riven.git riven-dev
+cd riven-dev
+bash dev/setup-devbox.sh
+```
+
+### Option B: one-step clone+setup
+
+```bash
+cd /home/landmin
+bash dev/clone-and-setup.sh
+```
+
+Notes:
+- The script creates a local `.env` with generated secrets and uses the monorepo dev compose file [docker-compose-dev-full.yml](docker-compose-dev-full.yml).
+- If Docker group permissions don't apply immediately, log out/in or run `newgrp docker`.
 
 ### What the settings do
 - `cache_dir`: Directory to store on‑disk cache files (use a user‑writable path).

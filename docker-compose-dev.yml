@@ -13,10 +13,13 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
       - ORIGIN=${RIVEN_ORIGIN:-http://localhost:8080}
+      - API_KEY=${RIVEN_API_KEY:-dev_only_change_me_1234567890123}
+      - RIVEN_FORCE_ENV=true
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven_frontend:5432/riven
     devices:
       - /dev/fuse
     cap_add:
@@ -25,29 +28,32 @@ services:
       - apparmor:unconfined
     volumes:
       - ./container_data/riven:/riven/data
-      - ./container_data/mount:/mount:rshared,z
-    depends_on:
-      riven_postgres:
-        condition: service_healthy
+      # Optional: set RIVEN_MOUNT_BIND_OPTS=':rshared' if you need mount propagation.
+      - ./container_data/mount:/mount${RIVEN_MOUNT_BIND_OPTS:-}
 
-  riven_postgres:
-    image: postgres:17-alpine
-    container_name: postgres
-    ports:
-      - "5432:5432"
+  # Provides the embedded Postgres for the backend.
+  riven_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: riven-frontend-local:dev
+    container_name: riven-frontend
     restart: unless-stopped
+    tty: true
     environment:
-      PGDATA: /var/lib/postgresql/data/pgdata
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: riven
+      - TZ=${TZ:-UTC}
+      - ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - BACKEND_URL=http://riven:8080
+      - BACKEND_API_KEY=${RIVEN_API_KEY:-dev_only_change_me_1234567890123}
+      - DATABASE_URL=/riven/data/riven.db
+      - AUTH_SECRET=${FRONTEND_AUTH_SECRET:-dev_auth_secret_change_me_123456}
+      - PGDATA=/riven/data/postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=riven
+    # Intentionally not publishing :3000 here; use docker-compose-dev-full.yml for full UI.
     volumes:
-      - ./container_data/db:/var/lib/postgresql/data/pgdata
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - ./container_data/frontend:/riven/data
 
   # jellyfin:
   #   image: jellyfin/jellyfin

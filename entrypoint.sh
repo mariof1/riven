@@ -37,6 +37,31 @@ fi
 
 
 echo "Container Initialization complete."
+
+if [ -n "${RIVEN_DATABASE_HOST:-}" ]; then
+    echo "Waiting for database to become ready..."
+    /riven/.venv/bin/python - <<'PY'
+import os
+import time
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
+
+url = os.environ.get("RIVEN_DATABASE_HOST")
+engine = create_engine(url, future=True, pool_pre_ping=True)
+
+for _ in range(60):
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        break
+    except OperationalError:
+        time.sleep(1)
+else:
+    raise SystemExit("Database not ready after 60s")
+PY
+fi
+
 echo "Starting Riven (Backend)..."
 
 # Execute the command

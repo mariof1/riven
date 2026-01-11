@@ -25,14 +25,14 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
       - ORIGIN=${RIVEN_ORIGIN:-http://localhost:8080}
       - RIVEN_FORCE_ENV=true
       - RIVEN_DATABASE_HOST=${RIVEN_DATABASE_HOST:?Set RIVEN_DATABASE_HOST to a postgresql+psycopg2 URL}
-      # Optional: secure the backend API
-      - RIVEN_API_KEY=${RIVEN_API_KEY:-}
+      # Backend API key (32 chars). Frontend must use the same value.
+      - API_KEY=${RIVEN_API_KEY:-dev_only_change_me_1234567890123}
     healthcheck:
       test: curl -s http://localhost:8080 >/dev/null || exit 1
       interval: 30s
@@ -46,7 +46,8 @@ services:
       - apparmor:unconfined
     volumes:
       - ./container_data/riven:/riven/data
-      - ./container_data/mount:/mount:rshared,z
+      # Optional: set RIVEN_MOUNT_BIND_OPTS=':rshared' if you need mount propagation.
+      - ./container_data/mount:/mount${RIVEN_MOUNT_BIND_OPTS:-}
 
   riven_frontend:
     build:
@@ -59,12 +60,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - TZ=UTC
+      - TZ=${TZ:-UTC}
       - ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
       - BACKEND_URL=http://riven:8080
-      - BACKEND_API_KEY=${RIVEN_API_KEY:-}
+      - BACKEND_API_KEY=${RIVEN_API_KEY:-dev_only_change_me_1234567890123}
       - DATABASE_URL=/riven/data/riven.db
-      - AUTH_SECRET=${FRONTEND_AUTH_SECRET:-change_me}
+      - AUTH_SECRET=${FRONTEND_AUTH_SECRET:-dev_auth_secret_change_me_123456}
     volumes:
       - ./container_data/frontend:/riven/data
     depends_on:

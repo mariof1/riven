@@ -43,14 +43,19 @@ To run the frontend, you need to have the backend running. You can find the back
 
 ### Using docker-compose (recommended)
 
+> [!NOTE]
+> In this monorepo checkout (backend + frontend in one repo), the recommended way to run everything is from the repo root:
+>
+> - `docker compose -f docker-compose-dev-full.yml up -d --build`
+>
+> This starts the backend + frontend together and also runs an embedded Postgres instance inside the frontend container for the backend.
+
 Make sure you have docker and docker-compose installed on your system.
 
-Edit the [`docker-compose.yml`](./docker-compose.yml) (make sure to replace the environment variables with your own) file to match your setup:
-
-Then run the following command:
+If you're using the standalone frontend setup, edit the [`docker-compose.yml`](./docker-compose.yml) file (and replace the environment variables with your own), then run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 It will start the frontend container called `riven-frontend` on port `3000`.

@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, text
-from testcontainers.postgres import PostgresContainer
 
 from program.db.db import db, run_migrations
 from program.media.item import Episode, Movie, Show, Season
@@ -20,14 +19,34 @@ from program.scheduling.scheduler import ProgramScheduler
 
 @pytest.fixture(scope="session")
 def test_container():
-    """One container for the whole test session."""
-    with PostgresContainer(
-        "postgres:16.4-alpine3.20",
-        username="postgres",
-        password="postgres",
-        dbname="riven",
-    ) as pg:
-        yield pg
+    """Provide a Postgres connection URL for tests.
+
+    If an external DB is already available (e.g., baked-in/local), set one of:
+    - RIVEN_TEST_DATABASE_URL
+    - RIVEN_DATABASE_HOST
+    - DATABASE_URL
+
+    Tests no longer create a Postgres container. Provide an existing DB URL.
+    """
+
+    url = (
+        os.getenv("RIVEN_TEST_DATABASE_URL")
+        or os.getenv("RIVEN_DATABASE_HOST")
+        or os.getenv("DATABASE_URL")
+    )
+    if not url:
+        pytest.skip(
+            "No Postgres URL provided. Set RIVEN_TEST_DATABASE_URL (or RIVEN_DATABASE_HOST/DATABASE_URL)."
+        )
+
+    class _UrlContainer:
+        def __init__(self, connection_url: str):
+            self._connection_url = connection_url
+
+        def get_connection_url(self) -> str:
+            return self._connection_url
+
+    yield _UrlContainer(url)
 
 
 @pytest.fixture(scope="session")

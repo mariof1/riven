@@ -25,6 +25,18 @@ This starts:
 - Backend on `http://localhost:8080`
 - Frontend on `http://localhost:3000`
 
+Notes:
+- The backend requires PostgreSQL, but in this dev setup Postgres is run **inside** the frontend container (embedded Postgres).
+- Embedded Postgres data persists under `./container_data/frontend/postgres` (inside the container it's `${PGDATA:-/riven/data/postgres}`).
+
+## Dev box bootstrap (fresh Debian/Ubuntu)
+
+From the repo root:
+
+- `bash dev/setup-devbox.sh`
+
+This installs Docker/Compose, generates a local `.env`, prepares `./container_data/`, then builds/starts the stack.
+
 ## Frontend source provenance
 
 The `frontend/` folder is vendored from `mariof1/riven-frontend` (which is a fork of `rivenmedia/riven-frontend`).
