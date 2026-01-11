@@ -494,13 +494,14 @@ apt_install_prereqs() {
 
   step "Installing prerequisites"
   spinner "Updating apt index" $SUDO apt-get update -y
-  spinner "Installing packages (curl, ca-certificates, gnupg, openssl)" \
+  spinner "Installing packages (curl, ca-certificates, gnupg, openssl, util-linux)" \
     $SUDO apt-get install -y \
       ca-certificates \
       curl \
       gnupg \
       lsb-release \
-      openssl
+      openssl \
+      util-linux
 }
 
 install_docker() {
@@ -539,7 +540,13 @@ install_docker() {
 
   if [ "$(id -u)" -ne 0 ]; then
     spinner "Adding current user to docker group" $SUDO usermod -aG docker "$USER"
-    warn "You may need to log out/in (or run: newgrp docker)"
+    if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -Fxq docker; then
+      if need_cmd sg && user_in_group_db docker "${USER}"; then
+        ok "Picked up docker group via 'sg docker' for this run"
+      else
+        warn "You may need to log out/in (or run: newgrp docker)"
+      fi
+    fi
   fi
 }
 
@@ -559,18 +566,90 @@ docker_cmd() {
   echo "$SUDO docker"
 }
 
-docker_runtime_check() {
-  local DOCKER
-  DOCKER="$(docker_cmd)"
+user_in_group_db() {
+  # Usage: user_in_group_db group user
+  local group="$1" user="$2"
+  getent group "$group" 2>/dev/null | awk -F: '{print $4}' | tr ',' '\n' | grep -Fxq "$user"
+}
 
+docker_cmd_mode() {
+  # Returns one of: direct | sg | sudo
+  if [ "$(id -u)" -eq 0 ]; then
+    echo direct
+    return
+  fi
+
+  if docker info >/dev/null 2>&1; then
+    echo direct
+    return
+  fi
+
+  # If the user was just added to the docker group during this run, the current
+  # process won't have it yet. Use `sg docker -c ...` so Docker works immediately.
+  if need_cmd sg && user_in_group_db docker "${USER}"; then
+    echo sg
+    return
+  fi
+
+  echo sudo
+}
+
+docker_run_cmd_array() {
+  # Populates an array variable with the best way to run docker.
+  # Usage: docker_run_cmd_array out_array_name -- <docker args...>
+  local -n out="$1"; shift
+  [ "${1:-}" = "--" ] && shift
+
+  local mode
+  mode="$(docker_cmd_mode)"
+  out=()
+
+  if [ "$mode" = "direct" ]; then
+    out=(docker "$@")
+  elif [ "$mode" = "sg" ]; then
+    local sg_cmd
+    sg_cmd="$(printf '%q ' docker "$@")"
+    out=(sg docker -c "$sg_cmd")
+  else
+    require_sudo
+    out=($SUDO docker "$@")
+  fi
+}
+
+docker_compose_cmd_array() {
+  # Populates an array variable with the best way to run docker compose.
+  # Usage: docker_compose_cmd_array out_array_name -- <compose args...>
+  local -n out="$1"; shift
+  [ "${1:-}" = "--" ] && shift
+
+  local mode
+  mode="$(docker_cmd_mode)"
+  out=()
+
+  if [ "$mode" = "direct" ]; then
+    out=(docker compose "$@")
+  elif [ "$mode" = "sg" ]; then
+    local sg_cmd
+    sg_cmd="$(printf '%q ' docker compose "$@")"
+    out=(sg docker -c "$sg_cmd")
+  else
+    require_sudo
+    out=($SUDO docker compose "$@")
+  fi
+}
+
+docker_runtime_check() {
   step "Docker runtime"
   say "${DIM}Verifying containers can start…${RESET}"
 
   # Use a tiny image to validate runtime. This also surfaces common host issues
   # (unprivileged LXC, rootless limitations, daemon default sysctls).
+  local -a cmd
+  docker_run_cmd_array cmd -- run --rm --pull=always alpine:3.20 true
+
   set +e
   local out rc
-  out="$($DOCKER run --rm --pull=always alpine:3.20 true 2>&1)"
+  out="$("${cmd[@]}" 2>&1)"
   rc=$?
   set -e
 
@@ -778,9 +857,6 @@ prepare_container_data() {
 }
 
 compose_up() {
-  local DOCKER
-  DOCKER="$(docker_cmd)"
-
   local ui_port media_flavor plex_port expose_plex
   ui_port="$(env_get .env RIVEN_UI_PORT 3000)"
   media_flavor="$(env_get .env RIVEN_MEDIA_FLAVOR none)"
@@ -802,8 +878,9 @@ compose_up() {
   write_compose_override "$override_file" "$ui_port" "$media_flavor" "$plex_port" "$expose_plex" "$enable_fuse"
 
   step "Build + start containers"
-  spinner "docker compose up (build + start)" \
-    $DOCKER compose -f "$COMPOSE_FILE_DEFAULT" -f "$override_file" up -d --build
+  local -a compose_cmd
+  docker_compose_cmd_array compose_cmd -- -f "$COMPOSE_FILE_DEFAULT" -f "$override_file" up -d --build
+  spinner "docker compose up (build + start)" "${compose_cmd[@]}"
 
   step "Smoke test"
   if need_cmd curl; then
