@@ -123,7 +123,7 @@ prompt_secret() {
 
   local answer
   if [ -n "${existing_value:-}" ]; then
-    printf "%s" "${question} (leave blank to keep existing): " >/dev/tty
+    say "${question} ${DIM}(leave blank to keep existing; input hidden)${RESET}"
     IFS= read -r -s answer </dev/tty || true
     printf "\n" >/dev/tty
     if [ -z "${answer:-}" ]; then
@@ -131,7 +131,7 @@ prompt_secret() {
     fi
   else
     while true; do
-      printf "%s" "${question}: " >/dev/tty
+      say "${question} ${DIM}(input hidden)${RESET}"
       IFS= read -r -s answer </dev/tty || true
       printf "\n" >/dev/tty
       if [ -n "${answer:-}" ]; then
