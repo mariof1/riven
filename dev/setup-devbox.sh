@@ -18,6 +18,8 @@ set -euo pipefail
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+DEBUG=0
+
 is_tty() {
   [ -t 1 ]
 }
@@ -60,6 +62,31 @@ fail() { say "${RED}✖${RESET} $*"; }
 
 step() {
   say "${BOLD}${BLUE}==>${RESET} ${BOLD}$*${RESET}"
+}
+
+usage() {
+  cat 1>&2 <<EOF
+Usage: ./dev/setup-devbox.sh [--debug]
+
+Options:
+  --debug, -d   Show all command output (no spinner)
+  --help,  -h   Show this help
+EOF
+}
+
+parse_args() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --debug|-d) DEBUG=1 ;;
+      --help|-h) usage; exit 0 ;;
+      *)
+        say "Unknown argument: $arg"
+        usage
+        exit 2
+        ;;
+    esac
+  done
 }
 
 is_interactive() {
@@ -267,9 +294,21 @@ spinner() {
   local message="$1"; shift
   local -a cmd=("$@")
 
-  if ! is_tty; then
+  if [ "${DEBUG:-0}" = "1" ] || ! is_tty; then
     say "$message"
+    set +e
     run_quiet "${cmd[@]}"
+    local rc=$?
+    set -e
+
+    if [ "$rc" -eq 0 ]; then
+      ok "$message"
+    else
+      fail "$message"
+      fail "See log: ${LOG_FILE}"
+      tail -n 80 "$LOG_FILE" 1>&2 || true
+      exit "$rc"
+    fi
     return
   fi
 
@@ -315,7 +354,18 @@ run_quiet() {
     printf "\n"
   } >>"$LOG_FILE"
 
-  "$@" >>"$LOG_FILE" 2>&1
+  if [ "${DEBUG:-0}" = "1" ]; then
+    local cmd_str
+    cmd_str="$(printf "%q " "$@")"
+    say "${DIM}$ ${cmd_str}${RESET}"
+    if need_cmd tee; then
+      "$@" 2>&1 | tee -a "$LOG_FILE"
+    else
+      "$@" 2>&1
+    fi
+  else
+    "$@" >>"$LOG_FILE" 2>&1
+  fi
 }
 
 on_err() {
@@ -700,11 +750,15 @@ compose_up() {
 
 main() {
   init_ui
+  parse_args "$@"
   trap on_err ERR
   trap cleanup EXIT
 
   say "${BOLD}Riven devbox setup${RESET} ${DIM}(this will install Docker + start containers)${RESET}"
   say "${DIM}Log: ${LOG_FILE}${RESET}"
+  if [ "${DEBUG:-0}" = "1" ]; then
+    warn "Debug enabled: showing all command output"
+  fi
 
   validate_repo_root
   validate_prereqs
