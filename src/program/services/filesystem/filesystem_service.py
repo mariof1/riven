@@ -5,6 +5,7 @@ using the RivenVFS implementation.
 """
 
 from typing import TYPE_CHECKING
+import time
 from loguru import logger
 
 from program.services.filesystem.common_utils import get_items_to_update
@@ -28,6 +29,7 @@ class FilesystemService(Runner[FilesystemModel]):
         self.settings = settings_manager.settings.filesystem
         self.riven_vfs = None
         self.downloader = downloader  # Store for potential reinit
+        self._last_unmounted_log_at = 0.0
         self._initialize_rivenvfs(downloader)
 
     @classmethod
@@ -122,18 +124,24 @@ class FilesystemService(Runner[FilesystemModel]):
         # Check RivenVFS is mounted
         if not self.riven_vfs.mounted:
             # RivenVFS mounts asynchronously in a background thread; give it a
-            # short grace period to finish mounting during startup.
+            # short grace period to finish mounting.
             try:
-                self.riven_vfs.wait_until_mounted(timeout_seconds=5.0)
+                self.riven_vfs.wait_until_mounted(timeout_seconds=0.5)
             except Exception:
                 pass
 
         if not self.riven_vfs.mounted:
-            last_error = getattr(self.riven_vfs, "last_mount_error", None)
-            if last_error:
-                logger.error(f"FilesystemService: RivenVFS not mounted ({last_error})")
-            else:
-                logger.error("FilesystemService: RivenVFS not mounted")
+            # Avoid log spam during retries (Program polls initialized status).
+            now = time.monotonic()
+            if now - self._last_unmounted_log_at >= 10.0:
+                last_error = getattr(self.riven_vfs, "last_mount_error", None)
+                if last_error:
+                    logger.error(
+                        f"FilesystemService: RivenVFS not mounted ({last_error})"
+                    )
+                else:
+                    logger.error("FilesystemService: RivenVFS not mounted")
+                self._last_unmounted_log_at = now
             return False
 
         return True

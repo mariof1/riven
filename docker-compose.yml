@@ -53,5 +53,4 @@ services:
         volumes:
             # Persistent data (secrets, DB, logs, caches)
             - ./container_data/riven:/riven/data
-            # Mount root used by RivenVFS (no host propagation flags required)
-            - ./container_data/mount:/mount
+            # RivenVFS mounts to /mount inside the container (no host bind mount)

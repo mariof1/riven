@@ -977,7 +977,7 @@ confirm_run_unattended() {
 
 prepare_container_data() {
   step "Local data directories"
-  mkdir -p container_data/riven container_data/mount
+  mkdir -p container_data/riven
 
   local puid pgid
   puid="$(id -u)"
