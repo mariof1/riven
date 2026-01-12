@@ -50,6 +50,12 @@ services:
             # Allow first-time login via Plex OAuth by default.
             - ENABLE_PLEX_SIGNUP=${ENABLE_PLEX_SIGNUP:-true}
 
+            # Optional: bootstrap a local admin account (only used if no users exist yet).
+            # If unset, the container will generate/persist values under ./container_data/riven/secrets/riven.env.
+            - RIVEN_ADMIN_USERNAME=${RIVEN_ADMIN_USERNAME:-}
+            - RIVEN_ADMIN_EMAIL=${RIVEN_ADMIN_EMAIL:-}
+            - RIVEN_ADMIN_PASSWORD=${RIVEN_ADMIN_PASSWORD:-}
+
         devices:
             - /dev/fuse
         cap_add:

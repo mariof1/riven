@@ -78,12 +78,32 @@ ensure_dirs() {
 write_env_kv() {
   local key="$1" value="$2" file="$3"
   # Update or append KEY=VALUE
-  if [ -f "$file" ] && grep -qE "^${key}=" "$file"; then
-    # Use perl for safe in-place editing
-    perl -0777 -pe "s/^${key}=.*$/\Q${key}\E=${value}/m" -i "$file"
-  else
-    printf "%s=%s\n" "$key" "$value" >>"$file"
-  fi
+  python3 - "$key" "$value" "$file" <<'PY'
+import os
+import sys
+
+key, value, path = sys.argv[1], sys.argv[2], sys.argv[3]
+lines: list[str] = []
+if os.path.exists(path):
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+out: list[str] = []
+found = False
+prefix = key + "="
+for line in lines:
+    if line.startswith(prefix):
+        out.append(prefix + value)
+        found = True
+    else:
+        out.append(line)
+
+if not found:
+    out.append(prefix + value)
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write("\n".join(out) + "\n")
+PY
 }
 
 load_or_init_secrets() {
@@ -92,6 +112,11 @@ load_or_init_secrets() {
 
   local pre_db_pass
   pre_db_pass="${RIVEN_DB_PASSWORD:-}"
+
+  local pre_admin_username pre_admin_email pre_admin_password
+  pre_admin_username="${RIVEN_ADMIN_USERNAME:-}"
+  pre_admin_email="${RIVEN_ADMIN_EMAIL:-}"
+  pre_admin_password="${RIVEN_ADMIN_PASSWORD:-}"
 
   if [ ! -f "$SECRETS_ENV" ]; then
     umask 077
@@ -119,11 +144,40 @@ load_or_init_secrets() {
     export RIVEN_DB_PASSWORD="$pre_db_pass"
   fi
 
+  # Prefer user-provided admin credentials from the container environment.
+  if [ -n "${pre_admin_username:-}" ]; then
+    export RIVEN_ADMIN_USERNAME="$pre_admin_username"
+  fi
+  if [ -n "${pre_admin_email:-}" ]; then
+    export RIVEN_ADMIN_EMAIL="$pre_admin_email"
+  fi
+  if [ -n "${pre_admin_password:-}" ]; then
+    export RIVEN_ADMIN_PASSWORD="$pre_admin_password"
+  fi
+
   # If no DB password was provided, generate and persist one.
   if [ -z "${RIVEN_DB_PASSWORD:-}" ]; then
     export RIVEN_DB_PASSWORD="$(rand_hex 32)"
     write_env_kv "RIVEN_DB_PASSWORD" "$RIVEN_DB_PASSWORD" "$SECRETS_ENV"
     ok "Generated database password"
+  fi
+
+  # If admin bootstrap creds are not set, generate and persist them.
+  # The frontend will create the first admin user on startup (only if no users exist).
+  if [ -z "${RIVEN_ADMIN_USERNAME:-}" ]; then
+    export RIVEN_ADMIN_USERNAME="admin"
+    write_env_kv "RIVEN_ADMIN_USERNAME" "$RIVEN_ADMIN_USERNAME" "$SECRETS_ENV"
+  fi
+  # Better Auth validates email format; keep this as a real email.
+  # If it's missing or invalid, reset it to a valid default.
+  if [ -z "${RIVEN_ADMIN_EMAIL:-}" ] || ! [[ "${RIVEN_ADMIN_EMAIL}" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+    export RIVEN_ADMIN_EMAIL="admin@example.com"
+    write_env_kv "RIVEN_ADMIN_EMAIL" "$RIVEN_ADMIN_EMAIL" "$SECRETS_ENV"
+  fi
+  if [ -z "${RIVEN_ADMIN_PASSWORD:-}" ]; then
+    export RIVEN_ADMIN_PASSWORD="$(rand_hex 16)"
+    write_env_kv "RIVEN_ADMIN_PASSWORD" "$RIVEN_ADMIN_PASSWORD" "$SECRETS_ENV"
+    ok "Generated initial admin password (stored in $SECRETS_ENV)"
   fi
 }
 

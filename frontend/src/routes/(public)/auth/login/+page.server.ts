@@ -8,6 +8,7 @@ import { APIError } from "better-auth/api";
 import { getUsersCount } from "$lib/server/functions";
 import { getAuthProviders } from "$lib/server/auth";
 import { createScopedLogger } from "$lib/logger";
+import { maybeBootstrapAdminFromEnv } from "$lib/server/bootstrap-admin";
 
 const logger = createScopedLogger("auth");
 
@@ -17,6 +18,8 @@ const isSignupEnabled =
 const isCredentialEnabled = authProviders.credential?.enabled;
 
 export const load: PageServerLoad = async (event) => {
+    await maybeBootstrapAdminFromEnv();
+
     if (event.locals.user) {
         return redirect(302, "/auth");
     }
