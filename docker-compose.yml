@@ -28,6 +28,10 @@ services:
             # Minimal env. Secrets are generated on first boot and persisted under /riven/data.
             - TZ=${TZ:-Etc/UTC}
 
+            # Public URL used by the frontend auth/OAuth flows.
+            # IMPORTANT: set this to the URL you use in your browser (e.g. http://10.10.101.102:3000)
+            - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+
             # Filesystem mount path is fixed inside the container.
             - RIVEN_FILESYSTEM_MOUNT_PATH=/mount
 
