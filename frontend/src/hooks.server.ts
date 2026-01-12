@@ -37,7 +37,7 @@ export const betterAuthHandler: Handle = async ({ event, resolve }) => {
             event.locals.user = session?.user;
             return svelteKitHandler({ event, resolve, auth, building });
         } else {
-            redirect(307, "/auth/login");
+            throw redirect(307, "/auth/login");
         }
     } else {
         return svelteKitHandler({ event, resolve, auth, building });

@@ -18,6 +18,19 @@ set -euo pipefail
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+rand_hex() {
+  # Usage: rand_hex 16
+  local nbytes="$1"
+  if need_cmd openssl; then
+    openssl rand -hex "$nbytes" 2>/dev/null
+  else
+    python3 - <<PY
+import secrets
+print(secrets.token_hex(int("$nbytes")))
+PY
+  fi
+}
+
 DEBUG=0
 
 is_tty() {
@@ -800,6 +813,7 @@ ensure_env_file() {
   local tz_current media_flavor_current node_version_current
   local ui_port plex_port expose_plex frontend_origin frontend_origin_current
   local enable_plex_signup
+  local admin_username admin_email admin_password
 
   tz_current="$(env_get "$env_path" TZ "$tz_default")"
   media_flavor_current="$(env_get "$env_path" RIVEN_MEDIA_FLAVOR "none")"
@@ -858,6 +872,39 @@ ensure_env_file() {
 
   # Allow first-time signup via Plex OAuth by default (devbox-friendly).
   enable_plex_signup="$(env_get "$env_path" ENABLE_PLEX_SIGNUP "true")"
+
+  # Bootstrap admin creds (used only when no users exist in the auth DB).
+  admin_username="$(env_get "$env_path" RIVEN_ADMIN_USERNAME "admin")"
+  admin_email="$(env_get "$env_path" RIVEN_ADMIN_EMAIL "admin@example.com")"
+  admin_password="$(env_get "$env_path" RIVEN_ADMIN_PASSWORD "")"
+
+  if is_interactive; then
+    if prompt_yn "Bootstrap a local admin user from env on first run? (RIVEN_ADMIN_*)" "y"; then
+      admin_username="$(maybe_change_value "RIVEN_ADMIN_USERNAME" "$admin_username" "admin")"
+      admin_email="$(maybe_change_value "RIVEN_ADMIN_EMAIL" "$admin_email" "admin@example.com")"
+
+      if [ -z "${admin_password:-}" ]; then
+        if prompt_yn "Generate a random RIVEN_ADMIN_PASSWORD now?" "y"; then
+          admin_password="$(rand_hex 16)"
+        else
+          admin_password="$(prompt_secret "Enter RIVEN_ADMIN_PASSWORD" "")"
+        fi
+      else
+        if prompt_yn "Change RIVEN_ADMIN_PASSWORD? (currently: (set))" "n"; then
+          admin_password="$(prompt_secret "Enter new RIVEN_ADMIN_PASSWORD" "")"
+        fi
+      fi
+    else
+      admin_username=""
+      admin_email=""
+      admin_password=""
+    fi
+  else
+    # Non-interactive defaults: keep existing if present, else generate a password.
+    if [ -z "${admin_password:-}" ]; then
+      admin_password="$(rand_hex 16)"
+    fi
+  fi
 
   if [ "$media_flavor" = "plex" ]; then
     say "${DIM}Plex is proprietary; you must supply a direct .deb URL to install it at runtime.${RESET}"
@@ -922,6 +969,11 @@ PLEX_CLAIM=$plex_claim
 # Allow Plex OAuth to create users on first login.
 # Set to false if you want to require admin-created users / existing accounts.
 ENABLE_PLEX_SIGNUP=$enable_plex_signup
+
+# Local admin bootstrap (used only if no users exist yet).
+RIVEN_ADMIN_USERNAME=$admin_username
+RIVEN_ADMIN_EMAIL=$admin_email
+RIVEN_ADMIN_PASSWORD=$admin_password
 
 # Host port mapping for Plex container port 32400 (only used if Plex is enabled + exposed).
 PLEX_PORT=$plex_port

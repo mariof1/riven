@@ -21,7 +21,7 @@ export const load: PageServerLoad = async (event) => {
     await maybeBootstrapAdminFromEnv();
 
     if (event.locals.user) {
-        return redirect(302, "/auth");
+        throw redirect(302, "/auth");
     }
 
     const isFirstUser = await noUserExists();
@@ -71,7 +71,7 @@ export const actions: Actions = {
             });
         }
 
-        return redirect(303, "/");
+        throw redirect(303, "/");
     },
     register: async (event) => {
         const isFirstUser = await noUserExists();
@@ -139,6 +139,6 @@ export const actions: Actions = {
             });
         }
 
-        return redirect(303, "/");
+        throw redirect(303, "/");
     }
 };
