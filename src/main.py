@@ -1,10 +1,6 @@
 from collections.abc import Awaitable, Callable
 import contextlib
-import signal
-import sys
-import threading
 import time
-from types import FrameType
 
 from kink import di
 import uvicorn
@@ -56,9 +52,6 @@ class LoguruMiddleware(BaseHTTPMiddleware):
             )
 
 
-args = handle_args()
-
-
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     di[AsyncClient] = AsyncClient()
@@ -68,12 +61,21 @@ async def lifespan(_: FastAPI):
     if proxy_url:
         di[ProxyClient] = ProxyClient(proxy_url=proxy_url)
 
+    # Start the core Program during app startup so the API doesn't accept
+    # requests while migrations/services are still initializing.
+    # This avoids long SSR hangs on first load (e.g. settings endpoints).
+    if Program in di and not di[Program].initialized:
+        di[Program].start()
+
     yield
 
     await di[AsyncClient].aclose()
 
     if ProxyClient in di:
         await di[ProxyClient].aclose()
+
+    if Program in di:
+        di[Program].stop()
 
 
 app = FastAPI(
@@ -110,47 +112,6 @@ app.add_middleware(
 
 app.include_router(app_router)
 
-
-class Server(uvicorn.Server):
-    def install_signal_handlers(self):
-        pass
-
-    @contextlib.contextmanager
-    def run_in_thread(self):
-        thread = threading.Thread(target=self.run, name="Riven")
-        thread.start()
-
-        try:
-            while not self.started:
-                time.sleep(1e-3)
-            yield
-        except Exception:
-            logger.exception("Error in server thread")
-            raise
-        finally:
-            self.should_exit = True
-            sys.exit(0)
-
-
-def signal_handler(signum: int, frame: FrameType | None):
-    logger.log("PROGRAM", "Exiting Gracefully.")
-    di[Program].stop()
-    sys.exit(0)
-
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-config = uvicorn.Config(app, host="0.0.0.0", port=args.port, log_config=None)
-server = Server(config=config)
-
-
-with server.run_in_thread():
-    try:
-        di[Program].start()
-        di[Program].run()
-    except Exception:
-        logger.exception("Error in main thread")
-    finally:
-        logger.critical("Server has been stopped")
-        sys.exit(0)
+if __name__ == "__main__":
+    args = handle_args()
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_config=None)
