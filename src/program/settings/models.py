@@ -493,8 +493,8 @@ class UpdatersModel(Observable):
         default=120, ge=1, description="Interval in seconds between library updates"
     )
     library_path: Path = Field(
-        default=Path("/path/to/library/mount"),
-        description="Path to which your media library mount point",
+        default=Path("/mount"),
+        description="Absolute path (inside the container) to your media library mount point (usually '/mount')",
     )
     plex: PlexLibraryModel = Field(
         default_factory=PlexLibraryModel,
