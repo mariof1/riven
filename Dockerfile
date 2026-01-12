@@ -17,7 +17,7 @@ WORKDIR /app
 # Use corepack/pnpm with buildkit caching and a cache-friendly copy order
 RUN corepack enable
 
-COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml* ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN --mount=type=cache,target=/pnpm/store \
   pnpm config set store-dir /pnpm/store && \
   pnpm install --frozen-lockfile

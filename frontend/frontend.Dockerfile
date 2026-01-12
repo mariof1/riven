@@ -1,4 +1,4 @@
-# Optional standalone frontend image (kept for compatibility)
+# Optional standalone frontend image (not used by the repo root single-container dev image)
 FROM node:24-alpine AS build
 WORKDIR /app
 RUN corepack enable

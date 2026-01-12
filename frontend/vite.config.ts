@@ -1,39 +1,44 @@
-import tailwindcss from "@tailwindcss/vite";
-import { sveltekit } from "@sveltejs/kit/vite";
-import { defineConfig } from "vite";
-import { readFileSync } from "fs";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
-const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
+export default defineConfig(() => {
+	// Docker entrypoint exports BACKEND_URL for the frontend process.
+	// We proxy /api -> backend so the browser can use relative URLs.
+	const backendUrl = process.env.BACKEND_URL ?? 'http://127.0.0.1:8080';
+	const backendApiKey = process.env.BACKEND_API_KEY ?? '';
 
-export default defineConfig({
-    plugins: [tailwindcss(), sveltekit()],
-    define: {
-        __APP_VERSION__: JSON.stringify(pkg.version)
-    },
-    build: {
-        rollupOptions: {
-            onwarn(warning, warn) {
-                const message = typeof warning === "string" ? warning : warning.message;
-                const id = typeof warning === "object" && warning ? (warning as any).id : undefined;
-
-                // Known noisy third-party warning from svelte-tel-input's published bundle.
-                if (
-                    typeof id === "string" &&
-                    id.includes("svelte-tel-input") &&
-                    typeof message === "string" &&
-                    (message.includes("Can't resolve original location") ||
-                        message.includes("annotation that Rollup cannot interpret"))
-                ) {
-                    return;
-                }
-
-                // Noise from @vinejs/vine bundling in browser context.
-                if (typeof message === "string" && message.includes('Module "node:dns/promises"')) {
-                    return;
-                }
-
-                warn(warning);
-            }
-        }
-    }
+	return {
+		plugins: [tailwindcss(), react()],
+		server: {
+			host: true,
+			port: 3000,
+			strictPort: true,
+			proxy: {
+				'/api': {
+					target: backendUrl,
+					changeOrigin: true,
+					configure: (proxy) => {
+						proxy.on('proxyReq', (proxyReq) => {
+							if (backendApiKey) proxyReq.setHeader('x-api-key', backendApiKey);
+						});
+					}
+				},
+				'/openapi.json': {
+					target: backendUrl,
+					changeOrigin: true,
+					configure: (proxy) => {
+						proxy.on('proxyReq', (proxyReq) => {
+							if (backendApiKey) proxyReq.setHeader('x-api-key', backendApiKey);
+						});
+					}
+				}
+			}
+		},
+		preview: {
+			host: true,
+			port: 3000,
+			strictPort: true
+		}
+	};
 });

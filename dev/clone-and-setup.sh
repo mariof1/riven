@@ -4,11 +4,14 @@ set -euo pipefail
 # Convenience wrapper: clone into ./riven-dev and run devbox setup.
 #
 # Usage (from e.g. /home/landmin):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/mariof1/riven/dev/dev/clone-and-setup.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/rivenmedia/riven/dev/dev/clone-and-setup.sh)"
+#
+# To test a non-default branch:
+#   BRANCH=refactor/frontend-rewrite bash -c "$(curl -fsSL https://raw.githubusercontent.com/rivenmedia/riven/dev/dev/clone-and-setup.sh)"
 # or locally:
 #   bash dev/clone-and-setup.sh
 
-REPO_URL="${REPO_URL:-https://github.com/mariof1/riven.git}"
+REPO_URL="${REPO_URL:-https://github.com/rivenmedia/riven.git}"
 TARGET_DIR="${TARGET_DIR:-riven-dev}"
 BRANCH="${BRANCH:-dev}"
 

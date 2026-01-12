@@ -1053,6 +1053,9 @@ compose_up() {
   plex_port="$(env_get .env PLEX_PORT 32400)"
   expose_plex="$(env_get .env PLEX_EXPOSE_PORT n)"
 
+  # Prefer BuildKit for local builds.
+  export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+
   local override_file
   override_file="${COMPOSE_OVERRIDE_FILE:-/tmp/riven-dev.override.yml}"
 
