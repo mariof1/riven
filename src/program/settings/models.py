@@ -1,6 +1,7 @@
 """Riven settings models"""
 
 from collections.abc import Callable
+import contextlib
 from pathlib import Path
 from typing import Any, Literal, Annotated
 
@@ -20,6 +21,9 @@ from program.utils import generate_api_key, get_version
 deprecation_warning = (
     "This has been deprecated and will be removed in a future version."
 )
+
+
+_suspend_notify_count = 0
 
 
 def validate_empty_or_url(v: Any) -> str:
@@ -42,13 +46,23 @@ class Observable(MigratableBaseModel):
     _notify_observers: Callable[..., Any] | None = None
 
     @classmethod
+    @contextlib.contextmanager
+    def suspend_notifications(cls):
+        global _suspend_notify_count
+        _suspend_notify_count += 1
+        try:
+            yield
+        finally:
+            _suspend_notify_count = max(0, _suspend_notify_count - 1)
+
+    @classmethod
     def set_notify_observers(cls, notify_observers_callable: Callable[..., Any]):
         cls._notify_observers = notify_observers_callable
 
     def __setattr__(self, name: str, value: Any):
         super().__setattr__(name, value)
 
-        if self.__class__._notify_observers:
+        if self.__class__._notify_observers and _suspend_notify_count == 0:
             self.__class__._notify_observers()
 
 

@@ -23,13 +23,14 @@ class SettingsManager:
         if not self.settings_file.exists():
             logger.info(f"Settings filename: {self.filename}")
 
-            self.settings = AppModel()
-            self.settings = AppModel.model_validate(
-                self.check_environment(
-                    self.settings.model_dump(),
-                    "RIVEN",
+            with Observable.suspend_notifications():
+                self.settings = AppModel()
+                self.settings = AppModel.model_validate(
+                    self.check_environment(
+                        self.settings.model_dump(),
+                        "RIVEN",
+                    )
                 )
-            )
 
             self.notify_observers()
         else:
@@ -103,7 +104,8 @@ class SettingsManager:
                             "RIVEN",
                         )
 
-            self.settings = AppModel.model_validate(settings_dict)
+            with Observable.suspend_notifications():
+                self.settings = AppModel.model_validate(settings_dict)
             self.save()
         except ValidationError as e:
             formatted_error = format_validation_error(e)

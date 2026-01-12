@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, HTTPException, Path, Query
 from pydantic import TypeAdapter, ValidationError
 
 from program.settings import settings_manager
+from program.settings.models import Observable
 from program.settings.models import AppModel
 
 from ..models.shared import MessageResponse
@@ -204,14 +205,16 @@ async def save_settings() -> MessageResponse:
     response_model=AppModel,
 )
 async def get_all_settings() -> AppModel:
-    settings = copy(settings_manager.settings)
+    with Observable.suspend_notifications():
+        settings = copy(settings_manager.settings)
 
     # If configured, the mount path is controlled by the container.
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
     if forced_mount_path:
-        settings.filesystem.mount_path = forced_mount_path
-        settings.updaters.library_path = forced_mount_path
-        settings.filesystem.cache_dir = settings_manager.settings.filesystem.cache_dir
+        with Observable.suspend_notifications():
+            settings.filesystem.mount_path = forced_mount_path
+            settings.updaters.library_path = forced_mount_path
+            settings.filesystem.cache_dir = settings_manager.settings.filesystem.cache_dir
 
     return settings
 
