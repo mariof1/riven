@@ -1,5 +1,5 @@
 import { auth } from "$lib/server/auth";
-import { redirect, error, type Handle, type ServerInit } from "@sveltejs/kit";
+import { redirect, error, type Handle, type HandleFetch, type ServerInit } from "@sveltejs/kit";
 import { svelteKitHandler } from "better-auth/svelte-kit";
 import { building } from "$app/environment";
 import { sequence } from "@sveltejs/kit/hooks";
@@ -12,6 +12,67 @@ import { createCustomFetch } from "$lib/custom-fetch";
 import { createScopedLogger } from "$lib/logger";
 
 const logger = createScopedLogger("hooks");
+const fetchLogger = createScopedLogger("fetch");
+
+function shouldSkipTimeout(request: Request): boolean {
+    const accept = request.headers.get("accept") ?? "";
+    if (accept.includes("text/event-stream")) return true;
+
+    // Streaming endpoints (HLS/SSE) can legitimately run indefinitely.
+    const pathname = new URL(request.url).pathname;
+    return (
+        pathname.includes("/stream/") ||
+        pathname.includes("/scrape_stream") ||
+        pathname.includes("/notifications")
+    );
+}
+
+function withTimeoutSignal(request: Request, timeoutMs: number): Request {
+    if (timeoutMs <= 0 || shouldSkipTimeout(request)) {
+        return request;
+    }
+
+    // Node.js 18+ supports AbortSignal.timeout and AbortSignal.any.
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const existingSignal = request.signal;
+
+    // If the request already has a signal, combine it.
+    const combinedSignal = existingSignal ? AbortSignal.any([existingSignal, timeoutSignal]) : timeoutSignal;
+    return new Request(request, { signal: combinedSignal });
+}
+
+export const handleFetch: HandleFetch = async ({ event, request, fetch }) => {
+    const start = Date.now();
+    const backendBase = event.locals.backendUrl;
+
+    // Prefer a shorter timeout for external providers; keep backend slightly longer.
+    const isBackendCall = !!backendBase && request.url.startsWith(backendBase);
+    const timeoutMs = isBackendCall ? 30_000 : 20_000;
+
+    try {
+        const req = withTimeoutSignal(request, timeoutMs);
+        const response = await fetch(req);
+
+        const elapsedMs = Date.now() - start;
+        if (elapsedMs >= 2_000) {
+            fetchLogger.warn(
+                `${request.method} ${new URL(request.url).pathname} -> ${response.status} in ${elapsedMs}ms` +
+                    (isBackendCall ? " (backend)" : "")
+            );
+        }
+
+        return response;
+    } catch (e) {
+        const elapsedMs = Date.now() - start;
+        const msg = e instanceof Error ? e.message : String(e);
+        fetchLogger.error(
+            `${request.method} ${new URL(request.url).pathname} failed after ${elapsedMs}ms` +
+                (isBackendCall ? " (backend)" : "") +
+                `: ${msg}`
+        );
+        throw e;
+    }
+};
 
 export const init: ServerInit = async () => {
     if (!env.BACKEND_URL) {

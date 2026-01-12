@@ -1,5 +1,5 @@
 import { error } from "@sveltejs/kit";
-import type { RequestHandler, RequestEvent } from "@sveltejs/kit";
+import type { RequestHandler } from "@sveltejs/kit";
 import { env } from "$env/dynamic/private";
 import { produce } from "sveltekit-sse";
 import { createScopedLogger } from "$lib/logger";
@@ -11,7 +11,7 @@ const logger = createScopedLogger("scrape-stream");
  * Forwards the request to the backend's scrape_stream endpoint and
  * streams the response back to the client.
  */
-export const GET: RequestHandler = async ({ locals, url }) => {
+export const GET: RequestHandler = async ({ locals, url, fetch }) => {
     if (!locals.user || !locals.session) {
         error(401, "Unauthorized");
     }

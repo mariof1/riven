@@ -6,7 +6,7 @@ import { createScopedLogger } from "$lib/logger";
 
 const logger = createScopedLogger("notifications-api");
 
-export const POST: RequestHandler = async ({ locals }) => {
+export const POST: RequestHandler = async ({ locals, fetch }) => {
     if (!locals.user || !locals.session) {
         error(401, "Unauthorized");
     }

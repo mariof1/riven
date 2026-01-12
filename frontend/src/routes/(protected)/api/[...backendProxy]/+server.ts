@@ -1,11 +1,17 @@
 import { error, json } from "@sveltejs/kit";
 import type { RequestHandler } from "@sveltejs/kit";
 
-const proxyRequest = async (method: string, locals: App.Locals, url: URL, request?: Request) => {
+const proxyRequest = async (
+    method: string,
+    locals: App.Locals,
+    url: URL,
+    fetchFn: typeof fetch,
+    request?: Request
+) => {
     const backendUrl = new URL(url.pathname, locals.backendUrl);
 
     try {
-        const response = await fetch(`${backendUrl}${url.search}`, {
+        const response = await fetchFn(`${backendUrl}${url.search}`, {
             method,
             headers: {
                 "Content-Type": "application/json",
@@ -22,10 +28,11 @@ const proxyRequest = async (method: string, locals: App.Locals, url: URL, reques
     }
 };
 
-export const GET: RequestHandler = ({ locals, url }) => proxyRequest("GET", locals, url);
-export const POST: RequestHandler = ({ locals, url, request }) =>
-    proxyRequest("POST", locals, url, request);
-export const PUT: RequestHandler = ({ locals, url, request }) =>
-    proxyRequest("PUT", locals, url, request);
-export const DELETE: RequestHandler = ({ locals, url, request }) =>
-    proxyRequest("DELETE", locals, url, request);
+export const GET: RequestHandler = ({ locals, url, fetch }) =>
+    proxyRequest("GET", locals, url, fetch);
+export const POST: RequestHandler = ({ locals, url, fetch, request }) =>
+    proxyRequest("POST", locals, url, fetch, request);
+export const PUT: RequestHandler = ({ locals, url, fetch, request }) =>
+    proxyRequest("PUT", locals, url, fetch, request);
+export const DELETE: RequestHandler = ({ locals, url, fetch, request }) =>
+    proxyRequest("DELETE", locals, url, fetch, request);
