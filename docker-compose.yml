@@ -47,6 +47,9 @@ services:
             - PLEX_DEB_URL=${PLEX_DEB_URL:-}
             - PLEX_CLAIM=${PLEX_CLAIM:-}
 
+            # Allow first-time login via Plex OAuth by default.
+            - ENABLE_PLEX_SIGNUP=${ENABLE_PLEX_SIGNUP:-true}
+
         devices:
             - /dev/fuse
         cap_add:

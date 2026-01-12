@@ -286,6 +286,9 @@ start_frontend() {
   export AUTH_SECRET="${FRONTEND_AUTH_SECRET}"
   export DATABASE_URL="${FRONTEND_DATABASE_URL:-$FRONTEND_DATA_DIR/riven.db}"
 
+  # Better Auth Plex OAuth signup toggle. Default to enabled for unattended starts.
+  export ENABLE_PLEX_SIGNUP="${ENABLE_PLEX_SIGNUP:-true}"
+
   (
     cd /riven/frontend
     # Generate SvelteKit artifacts (e.g., .svelte-kit/tsconfig.json) for cleaner dev logs.
