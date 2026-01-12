@@ -282,7 +282,8 @@ write_compose_override() {
   local media_flavor="$3"
   local plex_port="$4"
   local expose_plex="$5"
-  local enable_fuse="$6"
+  # NOTE: FUSE/AppArmor settings are defined in docker-compose-dev-monolith.yml.
+  # The override file should only contain port mappings.
 
   cat >"$override_path" <<EOF
 services:
@@ -290,17 +291,6 @@ services:
     ports:
       - "${ui_port}:3000"
 EOF
-
-  if [ "${enable_fuse}" = "y" ]; then
-    cat >>"$override_path" <<EOF
-    devices:
-      - /dev/fuse
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
-EOF
-  fi
 
   if [ "$media_flavor" = "plex" ] && [ "$expose_plex" = "y" ]; then
     cat >>"$override_path" <<EOF
@@ -1020,16 +1010,13 @@ compose_up() {
   local override_file
   override_file="${COMPOSE_OVERRIDE_FILE:-/tmp/riven-dev-monolith.override.yml}"
 
-  local enable_fuse
-  enable_fuse="n"
-  if host_has_fuse; then
-    enable_fuse="y"
-  else
-    warn "Host is missing /dev/fuse; starting without FUSE/VFS support"
-    warn "To enable later: install fuse (e.g. sudo apt-get install fuse3) and load the module (sudo modprobe fuse), then re-run."
+  if ! host_has_fuse; then
+    fail "Host is missing /dev/fuse; monolith requires FUSE for RivenVFS."
+    fail "Install fuse3 (e.g. sudo apt-get install fuse3), load the module (sudo modprobe fuse), then re-run."
+    exit 1
   fi
 
-  write_compose_override "$override_file" "$ui_port" "$media_flavor" "$plex_port" "$expose_plex" "$enable_fuse"
+  write_compose_override "$override_file" "$ui_port" "$media_flavor" "$plex_port" "$expose_plex"
 
   step "Build + start containers"
   local -a compose_cmd
