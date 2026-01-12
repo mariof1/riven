@@ -4,7 +4,6 @@
     import { authClient } from "$lib/auth-client";
     import * as Avatar from "$lib/components/ui/avatar/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
-    import * as Drawer from "$lib/components/ui/drawer/index.js";
     import { Separator } from "$lib/components/ui/separator/index.js";
     import { cn } from "$lib/utils";
     import CalendarDays from "@lucide/svelte/icons/calendar-days";
@@ -111,74 +110,94 @@
     </div>
 </aside>
 
-<Drawer.Root bind:open={SidebarStore.isOpen}>
-    <Drawer.Trigger class="hidden"></Drawer.Trigger>
-    <Drawer.Content>
-        <Drawer.Header class="flex flex-row items-center justify-between">
-            {#if user}
-                <div class="flex items-center gap-2">
-                    <Avatar.Root class="cursor-poiter">
-                        <Avatar.Image
-                            src={user.image || "https://i.pravatar.cc/200"}
-                            alt={user.username} />
-                        <Avatar.Fallback>CN</Avatar.Fallback>
-                    </Avatar.Root>
-                    <p class="font-medium">
-                        {user.username}
-                    </p>
-                </div>
+{#if isMobileStore.isMobile && SidebarStore.isOpen}
+    <div class="fixed inset-0 z-40 md:hidden" aria-hidden="true">
+        <button
+            class="absolute inset-0 bg-black/50"
+            aria-label="Close navigation"
+            onclick={() => SidebarStore.close()}></button>
+
+        <div
+            class="bg-background absolute inset-y-0 left-0 w-[85%] max-w-sm overflow-y-auto border-r p-4 shadow-lg">
+            <div class="flex items-center justify-between">
+                {#if user}
+                    <div class="flex items-center gap-2">
+                        <Avatar.Root class="cursor-pointer">
+                            <Avatar.Image
+                                src={user.image || "https://i.pravatar.cc/200"}
+                                alt={user.username} />
+                            <Avatar.Fallback>CN</Avatar.Fallback>
+                        </Avatar.Root>
+                        <p class="font-medium">{user.username}</p>
+                    </div>
+                {:else}
+                    <div class="flex items-center gap-2">
+                        <Avatar.Root class="cursor-pointer">
+                            <Avatar.Image src="https://i.pravatar.cc/200" alt="@guest" />
+                            <Avatar.Fallback>G</Avatar.Fallback>
+                        </Avatar.Root>
+                        <p class="font-medium">Guest</p>
+                    </div>
+                {/if}
 
                 <div class="flex items-center gap-2">
                     <ThemeSwitcher />
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        class="size-10 rounded-md"
+                        aria-label="Close"
+                        onclick={() => SidebarStore.close()}>
+                        <span class="text-muted-foreground">✕</span>
+                    </Button>
+                </div>
+            </div>
+
+            {#if user}
+                <div class="mt-2">
                     <Button
                         onclick={async () => {
                             await authClient.signOut({
                                 fetchOptions: {
                                     onSuccess: () => {
+                                        SidebarStore.close();
                                         goto("/auth/login");
                                     }
                                 }
                             });
                         }}
                         variant="ghost"
-                        size="icon"
-                        class="size-10 rounded-md"
+                        class="w-full justify-start"
                         aria-label="Logout">
-                        <Drawer.Close class="text-muted-foreground">
-                            <LogOut class="h-5 w-5" />
-                        </Drawer.Close>
+                        <LogOut class="mr-2 h-5 w-5" />
+                        Logout
                     </Button>
                 </div>
-            {:else}
-                <div class="flex items-center gap-2">
-                    <Avatar.Root class="cursor-pointer">
-                        <Avatar.Image src="https://i.pravatar.cc/200" alt="@guest" />
-                        <Avatar.Fallback>G</Avatar.Fallback>
-                    </Avatar.Root>
-                    <p class="font-medium">Guest</p>
-                </div>
-
-                <ThemeSwitcher />
             {/if}
-        </Drawer.Header>
 
-        <Separator class="my-2" />
-        <nav class="mb-8 flex flex-col items-start gap-2">
-            {#each navItems as item}
-                <Drawer.Close
-                    onclick={() => {
-                        goto(item.href);
-                    }}
-                    class="w-full">
-                    <span
-                        class="flex w-full items-center gap-2 px-4 py-2 text-sm
-						{cn('hover:bg-accent/80 transition-colors', page.url.pathname === item.href && 'bg-accent')}"
+            <Separator class="my-3" />
+
+            <nav class="mb-8 flex flex-col items-start gap-1">
+                {#each navItems as item}
+                    <button
+                        type="button"
+                        onclick={() => {
+                            SidebarStore.close();
+                            goto(item.href);
+                        }}
+                        class={
+                            "flex w-full items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors " +
+                            cn(
+                                "hover:bg-accent/80",
+                                page.url.pathname === item.href && "bg-accent"
+                            )
+                        }
                         aria-label={item.label}>
                         <item.icon class="size-5" />
                         <span>{item.label}</span>
-                    </span>
-                </Drawer.Close>
-            {/each}
-        </nav>
-    </Drawer.Content>
-</Drawer.Root>
+                    </button>
+                {/each}
+            </nav>
+        </div>
+    </div>
+{/if}
