@@ -28,8 +28,8 @@ docs/
 .augment/
 .editorconfig
 
-# Local monolith test artifacts
-dev/monolith_test*.txt
+# Local test artifacts
+dev/riven_test*.txt
 
 # Python bytecode / Byte-compiled / optimized / DLL files
 __pycache__/

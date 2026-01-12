@@ -13,7 +13,7 @@ LABEL name="Riven" \
     description="Riven Media Server: Frontend" \
     url="https://github.com/rivenmedia/riven-frontend"
 
-# Postgres (dev monolith): run DB inside this container
+# Postgres (dev): run DB inside this container
 RUN apk add --no-cache postgresql17 su-exec
 
 # Set working directory

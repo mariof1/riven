@@ -19,7 +19,7 @@ From the repo root:
 
 ## Run locally (docker compose)
 
-- `docker compose -f docker-compose-dev-monolith.yml up -d --build`
+- `docker compose up -d --build`
 
 This starts:
 - Frontend on `http://localhost:3000`
@@ -27,7 +27,7 @@ This starts:
 Notes:
 - Backend API is internal-only (localhost inside the container).
 - Postgres runs inside the same container.
-- Persistent data lives under `./container_data/monolith`.
+- Persistent data lives under `./container_data/riven`.
 
 ## Dev box bootstrap (fresh Debian/Ubuntu)
 

@@ -236,7 +236,7 @@ class LibraryProfile(BaseModel):
 
 class FilesystemModel(Observable):
     mount_path: Path = Field(
-        default=Path("/path/to/riven/mount"),
+        default=Path("/mount"),
         description="Path where Riven will mount the virtual filesystem",
     )
 

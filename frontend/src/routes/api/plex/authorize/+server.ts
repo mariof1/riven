@@ -51,7 +51,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
         cookies.set("plex_auth_state", JSON.stringify(authData), {
             path: "/",
             httpOnly: true,
-            // In the monolith we often run over plain HTTP on LAN.
+            // In container setups we often run over plain HTTP on LAN.
             // If `secure: true` on HTTP, browsers will drop the cookie and the callback can't find it.
             secure: secureCookie,
             sameSite: "lax",

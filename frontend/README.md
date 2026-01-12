@@ -46,9 +46,9 @@ To run the frontend, you need to have the backend running. You can find the back
 > [!NOTE]
 > In this monorepo checkout (backend + frontend in one repo), the recommended way to run everything is from the repo root:
 >
-> - `docker compose -f docker-compose-dev-full.yml up -d --build`
+> - `docker compose up -d --build`
 >
-> This starts the backend + frontend together and also runs an embedded Postgres instance inside the frontend container for the backend.
+> This starts the backend + frontend together and also runs an embedded Postgres instance inside the container.
 
 Make sure you have docker and docker-compose installed on your system.
 

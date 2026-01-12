@@ -27,12 +27,11 @@ async def get_settings_schema() -> dict[str, Any]:
 
     schema = settings_manager.settings.model_json_schema()
 
-    # Monolith dev container: filesystem mount path is controlled by the container
-    # and should not be editable from the UI.
-    if os.environ.get("RIVEN_MONOLITH", "false").lower() == "true":
-        forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
-        if forced_mount_path:
-            _lock_filesystem_mount_path_in_schema(schema, forced_mount_path)
+    # Filesystem mount path is controlled by the container and should not be
+    # editable from the UI when forced via env.
+    forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+    if forced_mount_path:
+        _lock_filesystem_mount_path_in_schema(schema, forced_mount_path)
 
     return schema
 
@@ -169,10 +168,9 @@ async def save_settings() -> MessageResponse:
 async def get_all_settings() -> AppModel:
     settings = copy(settings_manager.settings)
 
-    # In monolith mode, the mount path is controlled by the container.
+    # If configured, the mount path is controlled by the container.
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
-    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
-    if monolith and forced_mount_path:
+    if forced_mount_path:
         settings.filesystem.mount_path = forced_mount_path
 
     return settings
@@ -194,10 +192,9 @@ async def get_settings(
 ) -> dict[str, Any]:
     current_settings = settings_manager.settings.model_dump()
 
-    # In monolith mode, the mount path is controlled by the container.
+    # If configured, the mount path is controlled by the container.
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
-    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
-    if monolith and forced_mount_path:
+    if forced_mount_path:
         current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
 
     data = dict[str, Any]()
@@ -230,9 +227,8 @@ async def set_all_settings(
 ) -> MessageResponse:
     current_settings = settings_manager.settings.model_dump()
 
-    # In monolith mode, the mount path is controlled by the container.
+    # If configured, the mount path is controlled by the container.
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
-    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
 
     def update_settings(current_obj: dict[str, Any], new_obj: dict[str, Any]):
         for key, value in new_obj.items():
@@ -243,7 +239,7 @@ async def set_all_settings(
 
     update_settings(current_settings, new_settings)
 
-    if monolith and forced_mount_path:
+    if forced_mount_path:
         current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
 
     # Validate and save the updated settings
@@ -278,7 +274,6 @@ async def set_settings(
     current_settings = settings_manager.settings.model_dump()
 
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
-    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
     requested_paths = [p.strip() for p in paths.split(",") if p.strip()]
 
     missing_values = [p for p in requested_paths if p not in values]
@@ -318,7 +313,7 @@ async def set_settings(
             )
         current_obj[keys[-1]] = values[path]
 
-    if monolith and forced_mount_path:
+    if forced_mount_path:
         current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
 
     try:

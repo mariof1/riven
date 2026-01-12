@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Monolith entrypoint (dev): starts embedded Postgres + backend + frontend,
+# Container entrypoint (dev): starts embedded Postgres + backend + frontend,
 # and optionally Plex, all inside a single container.
 #
 # Goals:
@@ -37,7 +37,7 @@ step() { say "${BOLD}${BLUE}==>${RESET} ${BOLD}$*${RESET}"; }
 
 DATA_DIR="${RIVEN_DATA_DIR:-/riven/data}"
 SECRETS_DIR="$DATA_DIR/secrets"
-SECRETS_ENV="$SECRETS_DIR/monolith.env"
+SECRETS_ENV="$SECRETS_DIR/riven.env"
 
 FRONTEND_DATA_DIR="$DATA_DIR/frontend"
 PLEX_DATA_DIR="$DATA_DIR/plex"
@@ -119,16 +119,11 @@ load_or_init_secrets() {
     export RIVEN_DB_PASSWORD="$pre_db_pass"
   fi
 
-  # Back-compat: older installs may have RIVEN_DB_PASSWORD persisted in monolith.env.
-  # New installs must provide it via env/.env.
+  # If no DB password was provided, generate and persist one.
   if [ -z "${RIVEN_DB_PASSWORD:-}" ]; then
-    fail "RIVEN_DB_PASSWORD is not set."
-    fail "Set it in your .env (host) so docker compose passes it into the container."
-    exit 1
-  fi
-
-  if grep -qE '^RIVEN_DB_PASSWORD=' "$SECRETS_ENV" 2>/dev/null; then
-    warn "RIVEN_DB_PASSWORD is also present in $SECRETS_ENV (legacy). Environment value takes precedence."
+    export RIVEN_DB_PASSWORD="$(rand_hex 32)"
+    write_env_kv "RIVEN_DB_PASSWORD" "$RIVEN_DB_PASSWORD" "$SECRETS_ENV"
+    ok "Generated database password"
   fi
 }
 
@@ -250,9 +245,8 @@ ensure_db_role_and_db() {
 start_backend() {
   step "Backend (internal only)"
 
-  export RIVEN_MONOLITH=true
   export RIVEN_FORCE_ENV=true
-  # In monolith mode the VFS mountpoint is fixed inside the container.
+  # Filesystem mount path is fixed inside the container.
   export RIVEN_FILESYSTEM_MOUNT_PATH="/mount"
   export ORIGIN="http://127.0.0.1:8080"
 

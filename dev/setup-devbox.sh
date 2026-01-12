@@ -282,12 +282,12 @@ write_compose_override() {
   local media_flavor="$3"
   local plex_port="$4"
   local expose_plex="$5"
-  # NOTE: FUSE/AppArmor settings are defined in docker-compose-dev-monolith.yml.
+  # NOTE: FUSE/AppArmor settings are defined in docker-compose.yml.
   # The override file should only contain port mappings.
 
   cat >"$override_path" <<EOF
 services:
-  riven_monolith:
+  riven:
     ports:
       - "${ui_port}:3000"
 EOF
@@ -334,7 +334,7 @@ prompt_swapfile_if_needed() {
 
   step "Memory"
   warn "Low memory detected; Docker build may be OOM-killed (exit 137)."
-  say "${DIM}Recommendation: enable swap before building the monolith image.${RESET}"
+  say "${DIM}Recommendation: enable swap before building the image.${RESET}"
 
   if prompt_yn "Create and enable a ${SWAPFILE_SIZE_GB}G swapfile at ${SWAPFILE_PATH}?" "y"; then
     CREATE_SWAPFILE="y"
@@ -430,10 +430,10 @@ spinner() {
   fi
 }
 
-dump_monolith_logs_tail() {
+dump_logs_tail() {
   # Best-effort helper for troubleshooting when the stack starts but UI isn't reachable.
   local name
-  name="${1:-riven-monolith}"
+  name="${1:-riven}"
   if need_cmd docker; then
     say "${DIM}--- recent container logs (${name}) ---${RESET}"
     docker logs --tail=200 "$name" 2>&1 | cat 1>&2 || true
@@ -541,7 +541,7 @@ detect_os() {
   fi
 }
 
-COMPOSE_FILE_DEFAULT="docker-compose-dev-monolith.yml"
+COMPOSE_FILE_DEFAULT="docker-compose.yml"
 
 validate_repo_root() {
   if [ ! -f "$COMPOSE_FILE_DEFAULT" ]; then
@@ -822,20 +822,14 @@ ensure_env_file() {
   db_password="$(env_get "$env_path" RIVEN_DB_PASSWORD "")"
   if is_interactive; then
     if [ -z "${db_password:-}" ]; then
-      warn "RIVEN_DB_PASSWORD is required to start the monolith"
-      db_password="$(prompt_secret "Enter RIVEN_DB_PASSWORD" "")"
+      if prompt_yn "Set RIVEN_DB_PASSWORD? (optional)" "n"; then
+        db_password="$(prompt_secret "Enter RIVEN_DB_PASSWORD" "")"
+      fi
     else
       if prompt_yn "Change RIVEN_DB_PASSWORD? (currently: (set))" "n"; then
         db_password="$(prompt_secret "Enter new RIVEN_DB_PASSWORD" "")"
       fi
     fi
-  fi
-
-  # Ensure DB password is set so the stack can start.
-  if [ -z "${db_password:-}" ]; then
-    fail "RIVEN_DB_PASSWORD is not set in $env_path"
-    fail "Set it and re-run (required to start the monolith)."
-    exit 1
   fi
 
   ui_port="$(maybe_change_port "Host port for Riven UI" "$(env_get "$env_path" RIVEN_UI_PORT "3000")" "3000")"
@@ -905,7 +899,7 @@ ensure_env_file() {
 TZ=$tz
 
 # User-provided password for the embedded Postgres role used by Riven.
-# This is passed into the monolith container as RIVEN_DB_PASSWORD.
+# This is passed into the container as RIVEN_DB_PASSWORD.
 RIVEN_DB_PASSWORD=$db_password
 
 # Host port mapping for the UI container port 3000.
@@ -915,13 +909,13 @@ RIVEN_UI_PORT=$ui_port
 # IMPORTANT: set this to the URL you use in your browser (e.g. http://10.10.101.102:3000)
 FRONTEND_ORIGIN=$frontend_origin
 
-# Monolith feature selection:
+# Feature selection:
 # - none (default)
 # - plex
 RIVEN_MEDIA_FLAVOR=$media_flavor
 
 # Optional: enable Plex (proprietary) by providing a .deb URL + claim token.
-# If you enable Plex, also expose port 32400 in docker-compose-dev-monolith.yml.
+# If you enable Plex, also expose port 32400 via the override file.
 PLEX_DEB_URL=$plex_deb_url
 PLEX_CLAIM=$plex_claim
 
@@ -933,26 +927,26 @@ ENABLE_PLEX_SIGNUP=$enable_plex_signup
 PLEX_PORT=$plex_port
 PLEX_EXPOSE_PORT=$expose_plex
 
-# Pin Node tarball version used in the monolith final stage.
+# Pin Node tarball version used in the final stage.
 NODE_VERSION=$node_version
 EOF
 
   ok "Wrote $env_path (gitignored via .env*)."
 }
 
-maybe_regenerate_monolith_secrets() {
-  # Secrets are persisted under ./container_data/monolith and include the backend API key
+maybe_regenerate_secrets() {
+  # Secrets are persisted under ./container_data/riven and include the backend API key
   # used by the frontend. Keep this interactive and upfront.
   if ! is_interactive; then
     return
   fi
 
   step "Secrets"
-  if prompt_yn "Regenerate monolith secrets (API key/auth secret)?" "n"; then
-    rm -f container_data/monolith/secrets/monolith.env 2>/dev/null || true
-    ok "Deleted container_data/monolith/secrets/monolith.env (will be re-generated on next start)"
+  if prompt_yn "Regenerate secrets (API key/auth secret)?" "n"; then
+    rm -f container_data/riven/secrets/riven.env 2>/dev/null || true
+    ok "Deleted container_data/riven/secrets/riven.env (will be re-generated on next start)"
   else
-    ok "Keeping existing monolith secrets"
+    ok "Keeping existing secrets"
   fi
 }
 
@@ -983,7 +977,7 @@ confirm_run_unattended() {
 
 prepare_container_data() {
   step "Local data directories"
-  mkdir -p container_data/monolith
+  mkdir -p container_data/riven container_data/mount
 
   local puid pgid
   puid="$(id -u)"
@@ -997,7 +991,7 @@ prepare_container_data() {
     require_sudo
     run_quiet $SUDO chown -R "$puid:$pgid" container_data || true
   fi
-  ok "Prepared ./container_data/monolith"
+  ok "Prepared ./container_data"
 }
 
 compose_up() {
@@ -1008,10 +1002,10 @@ compose_up() {
   expose_plex="$(env_get .env PLEX_EXPOSE_PORT n)"
 
   local override_file
-  override_file="${COMPOSE_OVERRIDE_FILE:-/tmp/riven-dev-monolith.override.yml}"
+  override_file="${COMPOSE_OVERRIDE_FILE:-/tmp/riven-dev.override.yml}"
 
   if ! host_has_fuse; then
-    fail "Host is missing /dev/fuse; monolith requires FUSE for RivenVFS."
+    fail "Host is missing /dev/fuse; this setup requires FUSE for RivenVFS."
     fail "Install fuse3 (e.g. sudo apt-get install fuse3), load the module (sudo modprobe fuse), then re-run."
     exit 1
   fi
@@ -1043,7 +1037,7 @@ compose_up() {
     if [ "$rc" -eq 0 ]; then
       ok "OK: http://localhost:${ui_port}"
     else
-      dump_monolith_logs_tail riven-monolith
+      dump_logs_tail riven
       exit "$rc"
     fi
   else
@@ -1073,7 +1067,7 @@ main() {
 
   # === Interactive phase (all prompts up-front) ===
   ensure_env_file
-  maybe_regenerate_monolith_secrets
+  maybe_regenerate_secrets
   confirm_run_unattended
 
   if [ "${AUTO_CONTINUE}" != "y" ]; then
@@ -1093,7 +1087,7 @@ main() {
     compose_up
   else
     ok "Skipping container start"
-    warn "Run later from repo root: docker compose -f docker-compose-dev-monolith.yml up -d --build"
+    warn "Run later from repo root: docker compose up -d --build"
   fi
 
   say ""

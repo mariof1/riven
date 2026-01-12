@@ -54,20 +54,20 @@ We are constantly adding features and improvements as we go along and squashing 
 
 ### Installation
 
-This repo currently targets a **single-container monolith** (dev) that runs:
+This repo targets a **single-container** (dev) stack that runs:
 - Frontend UI
 - Backend API (internal-only)
 - Embedded Postgres
 
-For a quick local run, use the monolith compose file:
+For a quick local run:
 
 ```bash
-docker compose -f docker-compose-dev-monolith.yml up -d --build
+docker compose up -d --build
 ```
 
 This exposes only the UI on `http://localhost:3000`.
 
-Persistent data (including generated secrets and Postgres data) is stored under `./container_data/monolith`.
+Persistent data (including generated secrets and Postgres data) is stored under `./container_data/riven`.
 
 > [!TIP]
 > **Make it automatic on boot**
@@ -124,7 +124,7 @@ Plex libraries that are currently required to have sections:
 
 If Plex’s library path appears empty after restarting Riven/RivenVFS, it’s usually timing (Plex scans before the FUSE mount is ready) or a stale mount.
 
-In the **single-container monolith** setup, mount propagation between containers is not a factor because Plex (when enabled) runs in the same container/mount namespace.
+In the **single-container** setup, mount propagation between containers is not a factor because Plex (when enabled) runs in the same container/mount namespace.
 
 1) Ensure Riven mounts to the container path
 
@@ -168,7 +168,7 @@ bash dev/clone-and-setup.sh
 ```
 
 Notes:
-- The script creates a minimal local `.env` and uses the monolith compose file [docker-compose-dev-monolith.yml](docker-compose-dev-monolith.yml).
+- The script creates a minimal local `.env` and uses `docker-compose.yml` from the repo root.
 - If Docker group permissions don't apply immediately, log out/in or run `newgrp docker`.
 
 ### What the settings do

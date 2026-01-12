@@ -1,5 +1,5 @@
 services:
-    # Single-container monolith (backend + frontend + embedded Postgres)
+    # Single-container stack (backend + frontend + embedded Postgres)
     #
     # Notes:
     # - Frontend UI is exposed on http://localhost:3000
@@ -10,12 +10,10 @@ services:
         # For self-host, build from this repo.
         build:
             context: .
-            dockerfile: Dockerfile.monolith
+            dockerfile: Dockerfile
             args:
                 NODE_VERSION: ${NODE_VERSION:-24.0.0}
-        # Alternatively, if you publish a monolith image, replace the build with:
-        # image: yourname/riven-monolith:latest
-        image: riven-monolith:local
+        image: riven:local
         container_name: riven
         restart: unless-stopped
         tty: true
@@ -29,6 +27,9 @@ services:
         environment:
             # Minimal env. Secrets are generated on first boot and persisted under /riven/data.
             - TZ=${TZ:-Etc/UTC}
+
+            # Filesystem mount path is fixed inside the container.
+            - RIVEN_FILESYSTEM_MOUNT_PATH=/mount
 
             # Media server selection:
             # - none (default)
@@ -51,6 +52,6 @@ services:
 
         volumes:
             # Persistent data (secrets, DB, logs, caches)
-            - /path/to/riven/data:/riven/data
+            - ./container_data/riven:/riven/data
             # Mount root used by RivenVFS (no host propagation flags required)
-            - /path/to/riven/mount:/mount
+            - ./container_data/mount:/mount

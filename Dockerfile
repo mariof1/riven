@@ -1,54 +1,125 @@
+# Single-container stack (dev): backend + frontend + embedded Postgres.
+# Base requirement: Debian (bookworm) with Python 3.13 (project requires ~=3.13).
+#
+# Notes:
+# - Plex is proprietary; this image does NOT bundle Plex. If enabled at runtime,
+#   the entrypoint can install Plex from a user-provided .deb URL.
+
 # -----------------
-# Builder Stage
+# Frontend Builder
 # -----------------
-FROM python:3.13-alpine AS builder
-
-# Install only the necessary build dependencies
-RUN apk add --no-cache gcc musl-dev libffi-dev python3-dev build-base curl curl-dev openssl-dev fuse3-dev pkgconf fuse3
-
-# Install uv (fast package manager)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
-
+FROM node:24-bookworm AS frontend_builder
+# Keep Node memory bounded during image builds; on low-memory machines this
+# prevents the kernel from OOM-killing `vite build` (often shows up as exit 143).
+ENV NODE_OPTIONS=--max-old-space-size=2048
 WORKDIR /app
 
-# Install dependencies with uv (no dev in builder)
+# Use corepack/pnpm with buildkit caching and a cache-friendly copy order
+RUN corepack enable
+
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml* ./
+RUN --mount=type=cache,target=/pnpm/store \
+  pnpm config set store-dir /pnpm/store && \
+  pnpm install --frozen-lockfile
+
+COPY frontend/ ./
+
+# Note: We intentionally do NOT run `pnpm run build` here.
+# In constrained environments it may be terminated (exit 143). For this
+# dev image we run the SvelteKit/Vite dev server at runtime instead.
+
+# -----------------
+# Backend Builder
+# -----------------
+FROM python:3.13-bookworm AS backend_builder
+
+# Build deps for python packages (pyfuse3, lxml, etc.)
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    gcc \
+  libfuse3-dev \
+    libffi-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    pkg-config \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
     uv venv .venv && uv sync --no-dev --frozen
 
 # -----------------
-# Final Stage
+# Final Image
 # -----------------
-FROM python:3.13-alpine
+FROM python:3.13-bookworm
 LABEL name="Riven" \
-      description="Riven Media Server" \
+  description="Riven (dev)" \
       url="https://github.com/rivenmedia/riven"
 
-# Install only runtime dependencies
-RUN apk add --no-cache curl libcurl shadow unzip ffmpeg libpq fuse3 libcap libcap-utils postgresql17-client
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Configure FUSE
-RUN sed -i 's/^#\s*user_allow_other/user_allow_other/' /etc/fuse.conf || \
-    echo 'user_allow_other' >> /etc/fuse.conf
+# Runtime deps:
+# - Postgres server
+# - FUSE
+# - node runtime
+# - curl for optional Plex install and health checks
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    fuse3 \
+    gosu \
+    libcap2-bin \
+    postgresql \
+    postgresql-contrib \
+    tini \
+  util-linux \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 24 runtime (official tarball)
+ARG NODE_VERSION=24.0.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) node_arch="x64" ;; \
+      arm64) node_arch="arm64" ;; \
+      *) echo "Unsupported arch for node: $arch"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -o /tmp/node.tar.xz; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; \
+    rm -f /tmp/node.tar.xz; \
+    node --version; npm --version
+
+# Configure FUSE allow_other
+RUN sed -i 's/^#\s*user_allow_other/user_allow_other/' /etc/fuse.conf || true \
+  && (grep -q '^user_allow_other' /etc/fuse.conf || echo 'user_allow_other' >> /etc/fuse.conf)
 
 WORKDIR /riven
 
-# Copy the virtual environment from the builder
-COPY --from=builder /app/.venv /riven/.venv
+# Backend venv
+COPY --from=backend_builder /app/.venv /riven/.venv
+ENV PATH="/riven/.venv/bin:${PATH}"
 
-# Grant the necessary capabilities to the Python binary
-RUN setcap cap_sys_admin+ep /usr/local/bin/python3.13
-
-# Activate the virtual environment by adding it to the PATH
-ENV PATH="/riven/.venv/bin:$PATH"
-
-# Copy application code and entrypoint
+# Backend code
 COPY src/ ./src
 COPY pyproject.toml uv.lock* ./
-COPY entrypoint.sh ./
 
-RUN chmod +x ./entrypoint.sh
+# Frontend runtime
+COPY --from=frontend_builder /app /riven/frontend
 
-ENTRYPOINT ["./entrypoint.sh"]
+# Entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Ports: UI exposed; backend is internal only.
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+
