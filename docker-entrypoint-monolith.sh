@@ -294,6 +294,8 @@ start_frontend() {
 
   (
     cd /riven/frontend
+    # Generate SvelteKit artifacts (e.g., .svelte-kit/tsconfig.json) for cleaner dev logs.
+    npm run prepare >/dev/null 2>&1 || true
     npm run dev -- --host 0.0.0.0 --port 3000 --strictPort
   ) &
   FRONTEND_PID=$!
