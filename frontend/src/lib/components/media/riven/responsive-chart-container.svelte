@@ -19,7 +19,7 @@
         config: ChartConfig;
     } = $props();
 
-    const chartId = `chart-${id.replace(/:/g, "")}`;
+    const chartId = $derived(`chart-${id.replace(/:/g, "")}`);
 
     setChartContext({
         get config() {

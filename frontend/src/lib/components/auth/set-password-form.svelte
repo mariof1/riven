@@ -23,11 +23,20 @@
         data: SuperValidated<SetPasswordSchema>;
     } = $props();
 
-    const form = superForm(data, {
-        validators: zod4Client(setPasswordSchema)
+    let form = $state<ReturnType<typeof superForm<SetPasswordSchema>> | null>(null);
+
+    // Create/recreate the form if `data` changes (Svelte 5 props are reactive).
+    $effect(() => {
+        form = superForm(data, {
+            validators: zod4Client(setPasswordSchema)
+        });
     });
 
-    const { form: formData, enhance, message, delayed } = form;
+    const formData = $derived(form?.form);
+    const message = $derived(form?.message);
+    const delayed = $derived(form?.delayed);
+    const enhance = (...args: Parameters<NonNullable<typeof form>["enhance"]>) =>
+        form?.enhance(...args);
 
     const passwordVisibility = $state({
         newPassword: false,

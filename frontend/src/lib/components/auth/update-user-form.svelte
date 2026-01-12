@@ -17,11 +17,20 @@
         data: SuperValidated<ChangeUserDataSchema>;
     } = $props();
 
-    const form = superForm(data, {
-        validators: zod4Client(changeUserDataSchema)
+    let form = $state<ReturnType<typeof superForm<ChangeUserDataSchema>> | null>(null);
+
+    // Create/recreate the form if `data` changes (Svelte 5 props are reactive).
+    $effect(() => {
+        form = superForm(data, {
+            validators: zod4Client(changeUserDataSchema)
+        });
     });
 
-    const { form: formData, enhance, message, delayed } = form;
+    const formData = $derived(form?.form);
+    const message = $derived(form?.message);
+    const delayed = $derived(form?.delayed);
+    const enhance = (...args: Parameters<NonNullable<typeof form>["enhance"]>) =>
+        form?.enhance(...args);
 
     $effect(() => {
         if ($message) {

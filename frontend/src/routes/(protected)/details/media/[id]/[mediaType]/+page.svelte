@@ -65,9 +65,13 @@
         return externalMetaData[normalizedKey];
     }
 
-    let showTrailer = $state(
-        !data.mediaDetails?.details.backdrop_path && !!data.mediaDetails?.details.trailer
-    );
+    let showTrailer = $state(false);
+
+    // Initialize from `data`, but keep it mutable (user can toggle).
+    $effect(() => {
+        showTrailer =
+            !data.mediaDetails?.details.backdrop_path && !!data.mediaDetails?.details.trailer;
+    });
 
     function toggleTrailer() {
         showTrailer = !showTrailer;

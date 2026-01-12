@@ -9,20 +9,22 @@
 
     let { itemId, class: className = "" }: VideoPlayerProps = $props();
 
-    let videoElement: HTMLVideoElement;
-    let hls: Hls;
+    let videoElement = $state<HTMLVideoElement | null>(null);
+    let hls: Hls | null = null;
     let error = $state<string | null>(null);
 
     // Direct stream URL (Original method)
-    const directUrl = `/api/stream/${itemId}`;
+    const directUrl = $derived(`/api/stream/${itemId}`);
     // HLS Proxy URL
-    const hlsParams = new URLSearchParams({
-        pix_fmt: 'yuv420p',
-        profile: 'high',
-        level: '4.1',
-        // resolution: '1920x1080' // Optional: Uncomment to force 1080p
-    });
-    const hlsUrl = `/api/stream/${itemId}/hls/index.m3u8?${hlsParams.toString()}`;
+    const hlsParams = $derived(
+        new URLSearchParams({
+            pix_fmt: 'yuv420p',
+            profile: 'high',
+            level: '4.1',
+            // resolution: '1920x1080' // Optional: Uncomment to force 1080p
+        }).toString()
+    );
+    const hlsUrl = $derived(`/api/stream/${itemId}/hls/index.m3u8?${hlsParams}`);
 
     function needsHls(): boolean {
         // Simple check: Create a dummy video and ask if it plays HEVC
@@ -38,6 +40,8 @@
     }
 
     onMount(() => {
+        if (!videoElement) return;
+
         if (needsHls()) {
             console.log("HEVC not supported. Switching to HLS transcoding.");
             if (Hls.isSupported()) {

@@ -23,9 +23,11 @@
 		...restProps
 	}: ToggleGroupPrimitive.RootProps & ToggleVariants = $props();
 
-	setToggleGroupCtx({
-		variant,
-		size,
+	$effect(() => {
+		setToggleGroupCtx({
+			variant,
+			size,
+		});
 	});
 </script>
 

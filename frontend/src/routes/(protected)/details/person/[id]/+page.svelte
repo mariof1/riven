@@ -9,8 +9,8 @@
 
     let selectedTab = $state<"acting" | "crew">("acting");
 
-    const birthdayToday = isDayAndMonthToday(data.person.birthday);
-    const memorialToday = isDayAndMonthToday(data.person.deathday);
+    const birthdayToday = $derived(isDayAndMonthToday(data.person.birthday));
+    const memorialToday = $derived(isDayAndMonthToday(data.person.deathday));
 </script>
 
 <svelte:head>
