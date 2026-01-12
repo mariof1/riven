@@ -10,6 +10,10 @@ export default defineConfig({
     define: {
         __APP_VERSION__: JSON.stringify(pkg.version)
     },
+    ssr: {
+        // bits-ui ships uncompiled `.svelte` files; it must be bundled for SSR.
+        noExternal: ["bits-ui"]
+    },
     build: {
         rollupOptions: {
             onwarn(warning, warn) {
