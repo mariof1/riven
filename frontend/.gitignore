@@ -4,3 +4,10 @@ dist
 .env
 .env.*
 .DS_Store
+
+# Local auth/dev sqlite DBs
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*

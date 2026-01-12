@@ -1,10 +1,7 @@
 import { Film, Library, Search, Settings } from 'lucide-react';
 import React from 'react';
-import { NavLink } from 'react-router-dom';
-
-type Props = {
-	children: React.ReactNode;
-};
+import { NavLink, Outlet } from 'react-router-dom';
+import { authClient, useSession } from '../lib/auth-client';
 
 const nav = [
 	{ to: '/', label: 'Home', icon: Film },
@@ -17,8 +14,9 @@ function cx(...parts: Array<string | false | undefined | null>) {
 	return parts.filter(Boolean).join(' ');
 }
 
-export default function AppShell({ children }: Props) {
+export default function AppShell() {
 	const [mobileOpen, setMobileOpen] = React.useState(false);
+	const session = useSession();
 
 	React.useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
@@ -27,6 +25,14 @@ export default function AppShell({ children }: Props) {
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
 	}, []);
+
+	async function signOut() {
+		try {
+			await authClient.signOut();
+		} finally {
+			window.location.href = '/auth/login';
+		}
+	}
 
 	return (
 		<div className="min-h-dvh">
@@ -51,12 +57,21 @@ export default function AppShell({ children }: Props) {
 					</div>
 
 					<div className="hidden items-center gap-2 md:flex">
+						<div className="max-w-[20rem] truncate text-xs text-slate-400">
+							{session.data?.user?.email || session.data?.user?.name}
+						</div>
 						<a
 							href="/settings"
 							className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
 						>
-							Quick settings
+							Settings
 						</a>
+						<button
+							onClick={() => void signOut()}
+							className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+						>
+							Sign out
+						</button>
 					</div>
 				</div>
 			</div>
@@ -89,7 +104,9 @@ export default function AppShell({ children }: Props) {
 				</aside>
 
 				{/* Content */}
-				<main className="min-w-0">{children}</main>
+				<main className="min-w-0">
+					<Outlet />
+				</main>
 			</div>
 
 			{/* Mobile drawer */}
