@@ -88,17 +88,19 @@ export default function SearchPage() {
 											<div className="min-w-0">
 												<div className="truncate text-sm font-medium text-slate-100">{title}</div>
 												<div className="mt-1 text-xs text-slate-400">
-													{type}{state ? ` • ${state}` : ''}
+													{type}
+													{state ? ` • ${state}` : ''}
 												</div>
 											</div>
-										<button
-											className="shrink-0 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
-											onClick={() => navigator.clipboard.writeText(JSON.stringify(item, null, 2))}
-										>
-											Copy JSON
-										</button>
+											<button
+												className="shrink-0 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+												onClick={() => navigator.clipboard.writeText(JSON.stringify(item, null, 2))}
+											>
+												Copy JSON
+											</button>
+										</div>
 									</div>
-								</div>
+								);
 							})}
 						</div>
 						{results.total_items > 20 ? (
