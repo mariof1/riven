@@ -210,6 +210,8 @@ class RivenVFS(pyfuse3.Operations):
         self._mountpoint = os.path.abspath(mountpoint)
         self._thread = None
         self._unmount_requested = trio_util.AsyncBool(False)
+        self._mounted_event = threading.Event()
+        self._last_mount_error: str | None = None
         self.stream_nursery: trio.Nursery
 
         def _fuse_runner():
@@ -227,6 +229,12 @@ class RivenVFS(pyfuse3.Operations):
                     # pyfuse3.main is a coroutine that needs to run in its own trio event loop
                     trio.run(_async_main)
                 except Exception:
+                    # Record the last error for easier startup diagnostics.
+                    # The main loop will retry unless unmount is requested.
+                    try:
+                        self._last_mount_error = "FUSE main loop error (see logs for traceback)"
+                    except Exception:
+                        pass
                     logger.exception("FUSE main loop error, restarting")
 
             logger.trace(f"FUSE main loop exited")
@@ -234,10 +242,29 @@ class RivenVFS(pyfuse3.Operations):
         self._thread = threading.Thread(target=_fuse_runner, daemon=True)
         self._thread.start()
 
-        logger.log("VFS", f"RivenVFS mounted at {self._mountpoint}")
+        logger.debug(f"Starting RivenVFS mount at {self._mountpoint}")
 
         # Synchronize library profiles with VFS structure
         self.sync()
+
+    @property
+    def last_mount_error(self) -> str | None:
+        return self._last_mount_error
+
+    def wait_until_mounted(self, timeout_seconds: float = 5.0) -> bool:
+        """Block until the filesystem is mounted (or timeout).
+
+        RivenVFS mounts asynchronously in a background thread. Some callers
+        (startup validation) need a short grace period so we don't fail before
+        pyfuse3.init completes.
+        """
+
+        if self.mounted:
+            return True
+
+        # Wait for the mountpoint lifecycle to signal mount.
+        self._mounted_event.wait(timeout=max(0.0, float(timeout_seconds)))
+        return self.mounted
 
     @asynccontextmanager
     async def mountpoint_lifecycle(self) -> AsyncGenerator[None]:
@@ -256,6 +283,9 @@ class RivenVFS(pyfuse3.Operations):
             pyfuse3.init(self, self._mountpoint, fuse_options)
 
             self.mounted = True
+            self._mounted_event.set()
+            self._last_mount_error = None
+            logger.log("VFS", f"RivenVFS mounted at {self._mountpoint}")
 
             # Open stream nursery for handling streaming operations.
             # This is separate from the main FUSE loop,
@@ -270,6 +300,13 @@ class RivenVFS(pyfuse3.Operations):
 
                         # Cancel streams on exit
                         nursery.cancel_scope.cancel()
+        except Exception as e:
+            # Persist a helpful error string for startup validation.
+            try:
+                self._last_mount_error = f"mount failed: {type(e).__name__}: {e}"
+            except Exception:
+                self._last_mount_error = "mount failed"
+            raise
         finally:
             self._cleanup_mountpoint(self._mountpoint)
             self.mounted = False
@@ -612,6 +649,12 @@ class RivenVFS(pyfuse3.Operations):
 
     def close(self) -> None:
         """Clean up and unmount the filesystem."""
+
+        # If init hasn't succeeded yet, pyfuse3.trio_token may not exist.
+        # Best-effort: request unmount and stop retry loop.
+        if not getattr(pyfuse3, "trio_token", None):
+            self._unmount_requested.value = True
+            return
 
         async def _request_unmount():
             logger.log("VFS", f"Unmounting RivenVFS from {self._mountpoint}")

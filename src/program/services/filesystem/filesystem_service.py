@@ -121,7 +121,19 @@ class FilesystemService(Runner[FilesystemModel]):
 
         # Check RivenVFS is mounted
         if not self.riven_vfs.mounted:
-            logger.error("FilesystemService: RivenVFS not mounted")
+            # RivenVFS mounts asynchronously in a background thread; give it a
+            # short grace period to finish mounting during startup.
+            try:
+                self.riven_vfs.wait_until_mounted(timeout_seconds=5.0)
+            except Exception:
+                pass
+
+        if not self.riven_vfs.mounted:
+            last_error = getattr(self.riven_vfs, "last_mount_error", None)
+            if last_error:
+                logger.error(f"FilesystemService: RivenVFS not mounted ({last_error})")
+            else:
+                logger.error("FilesystemService: RivenVFS not mounted")
             return False
 
         return True
