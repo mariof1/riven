@@ -1,4 +1,5 @@
 from copy import copy
+import os
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Body, HTTPException, Path, Query
@@ -24,7 +25,51 @@ router = APIRouter(
 async def get_settings_schema() -> dict[str, Any]:
     """Get the JSON schema for the settings."""
 
-    return settings_manager.settings.model_json_schema()
+    schema = settings_manager.settings.model_json_schema()
+
+    # Monolith dev container: filesystem mount path is controlled by the container
+    # and should not be editable from the UI.
+    if os.environ.get("RIVEN_MONOLITH", "false").lower() == "true":
+        forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+        if forced_mount_path:
+            _lock_filesystem_mount_path_in_schema(schema, forced_mount_path)
+
+    return schema
+
+
+def _lock_filesystem_mount_path_in_schema(schema: dict[str, Any], mount_path: str) -> None:
+    """Mutate JSON schema to make filesystem.mount_path read-only and constant."""
+
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return
+
+    filesystem_schema = props.get("filesystem")
+    if not isinstance(filesystem_schema, dict):
+        return
+
+    # Pydantic usually places nested models in $defs and references them.
+    target_schema: Any = filesystem_schema
+    ref = filesystem_schema.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        defs = schema.get("$defs")
+        if isinstance(defs, dict):
+            target_schema = defs.get(ref.split("/")[-1], target_schema)
+
+    if not isinstance(target_schema, dict):
+        return
+
+    fs_props = target_schema.get("properties")
+    if not isinstance(fs_props, dict):
+        return
+
+    mount_path_schema = fs_props.get("mount_path")
+    if not isinstance(mount_path_schema, dict):
+        return
+
+    mount_path_schema["readOnly"] = True
+    mount_path_schema["const"] = mount_path
+    mount_path_schema["default"] = mount_path
 
 
 @router.get(
@@ -170,6 +215,10 @@ async def set_all_settings(
 ) -> MessageResponse:
     current_settings = settings_manager.settings.model_dump()
 
+    # In monolith mode, the mount path is controlled by the container.
+    forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
+
     def update_settings(current_obj: dict[str, Any], new_obj: dict[str, Any]):
         for key, value in new_obj.items():
             if isinstance(value, dict) and key in current_obj:
@@ -178,6 +227,9 @@ async def set_all_settings(
                 current_obj[key] = value
 
     update_settings(current_settings, new_settings)
+
+    if monolith and forced_mount_path:
+        current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
 
     # Validate and save the updated settings
     try:
@@ -209,6 +261,9 @@ async def set_settings(
     ],
 ) -> MessageResponse:
     current_settings = settings_manager.settings.model_dump()
+
+    forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
     requested_paths = [p.strip() for p in paths.split(",") if p.strip()]
 
     missing_values = [p for p in requested_paths if p not in values]
@@ -247,6 +302,9 @@ async def set_settings(
                 detail=f"Key '{keys[-1]}' does not exist in path '{'.'.join(keys[:-1]) or 'root'}'.",
             )
         current_obj[keys[-1]] = values[path]
+
+    if monolith and forced_mount_path:
+        current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
 
     try:
         updated_settings = settings_manager.settings.__class__(**current_settings)

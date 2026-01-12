@@ -124,7 +124,12 @@ export class NotificationStore {
             .select("notification")
             .json<NotificationEvent>(({ error, previous }) => {
                 if (error) {
-                    logger.warn("Failed to parse notification:", error);
+                    // Some SSE implementations occasionally deliver empty/partial payloads
+                    // during reconnects/keepalives; avoid spamming the console for those.
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (!message.includes("Unexpected end of JSON input")) {
+                        logger.warn("Failed to parse notification:", error);
+                    }
                 }
                 return previous;
             });

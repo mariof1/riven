@@ -250,7 +250,10 @@ ensure_db_role_and_db() {
 start_backend() {
   step "Backend (internal only)"
 
+  export RIVEN_MONOLITH=true
   export RIVEN_FORCE_ENV=true
+  # In monolith mode the VFS mountpoint is fixed inside the container.
+  export RIVEN_FILESYSTEM_MOUNT_PATH="/mount"
   export ORIGIN="http://127.0.0.1:8080"
 
   # Use embedded Postgres (internal)

@@ -57,5 +57,9 @@ services:
       # Optional override: where persistent data is stored inside container.
       - RIVEN_DATA_DIR=/riven/data
 
+      # Monolith mode: filesystem mount path is fixed and managed by the container.
+      - RIVEN_MONOLITH=true
+      - RIVEN_FILESYSTEM_MOUNT_PATH=/mount
+
     volumes:
       - ./container_data/monolith:/riven/data
