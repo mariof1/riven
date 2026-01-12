@@ -27,48 +27,65 @@ async def get_settings_schema() -> dict[str, Any]:
 
     schema = settings_manager.settings.model_json_schema()
 
-    # Filesystem mount path is controlled by the container and should not be
-    # editable from the UI when forced via env.
+    # In the single-container setup, key filesystem paths are controlled by the
+    # container and should not be editable from the UI when forced via env.
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
     if forced_mount_path:
-        _lock_filesystem_mount_path_in_schema(schema, forced_mount_path)
+        _lock_field_in_schema(schema, top_key="filesystem", field_key="mount_path", value=forced_mount_path)
+        _lock_field_in_schema(schema, top_key="updaters", field_key="library_path", value=forced_mount_path)
+        _lock_field_in_schema(
+            schema,
+            top_key="filesystem",
+            field_key="cache_dir",
+            value=str(settings_manager.settings.filesystem.cache_dir),
+        )
 
     return schema
 
 
-def _lock_filesystem_mount_path_in_schema(schema: dict[str, Any], mount_path: str) -> None:
-    """Mutate JSON schema to make filesystem.mount_path read-only and constant."""
+def _resolve_ref(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        defs = schema.get("$defs")
+        if isinstance(defs, dict):
+            resolved = defs.get(ref.split("/")[-1])
+            if isinstance(resolved, dict):
+                return resolved
+    return node
+
+
+def _lock_field_in_schema(
+    schema: dict[str, Any],
+    *,
+    top_key: str,
+    field_key: str,
+    value: str,
+) -> None:
+    """Mutate JSON schema to make <top_key>.<field_key> read-only and constant."""
 
     props = schema.get("properties")
     if not isinstance(props, dict):
         return
 
-    filesystem_schema = props.get("filesystem")
-    if not isinstance(filesystem_schema, dict):
+    top_schema = props.get(top_key)
+    if not isinstance(top_schema, dict):
         return
 
-    # Pydantic usually places nested models in $defs and references them.
-    target_schema: Any = filesystem_schema
-    ref = filesystem_schema.get("$ref")
-    if isinstance(ref, str) and ref.startswith("#/$defs/"):
-        defs = schema.get("$defs")
-        if isinstance(defs, dict):
-            target_schema = defs.get(ref.split("/")[-1], target_schema)
-
+    target_schema: Any = _resolve_ref(schema, top_schema)
     if not isinstance(target_schema, dict):
         return
 
-    fs_props = target_schema.get("properties")
-    if not isinstance(fs_props, dict):
+    top_props = target_schema.get("properties")
+    if not isinstance(top_props, dict):
         return
 
-    mount_path_schema = fs_props.get("mount_path")
-    if not isinstance(mount_path_schema, dict):
+    field_schema = top_props.get(field_key)
+    if not isinstance(field_schema, dict):
         return
 
-    mount_path_schema["readOnly"] = True
-    mount_path_schema["const"] = mount_path
-    mount_path_schema["default"] = mount_path
+    field_schema["readOnly"] = True
+    field_schema["const"] = value
+    field_schema["default"] = value
 
 
 @router.get(
@@ -135,6 +152,27 @@ async def get_settings_schema_for_keys(
     if all_defs:
         filtered_schema["$defs"] = all_defs
 
+    forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+    if forced_mount_path:
+        _lock_field_in_schema(
+            filtered_schema,
+            top_key="updaters",
+            field_key="library_path",
+            value=forced_mount_path,
+        )
+        _lock_field_in_schema(
+            filtered_schema,
+            top_key="filesystem",
+            field_key="mount_path",
+            value=forced_mount_path,
+        )
+        _lock_field_in_schema(
+            filtered_schema,
+            top_key="filesystem",
+            field_key="cache_dir",
+            value=str(settings_manager.settings.filesystem.cache_dir),
+        )
+
     return filtered_schema
 
 
@@ -172,6 +210,8 @@ async def get_all_settings() -> AppModel:
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
     if forced_mount_path:
         settings.filesystem.mount_path = forced_mount_path
+        settings.updaters.library_path = forced_mount_path
+        settings.filesystem.cache_dir = settings_manager.settings.filesystem.cache_dir
 
     return settings
 
@@ -196,6 +236,10 @@ async def get_settings(
     forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
     if forced_mount_path:
         current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
+        current_settings.setdefault("updaters", {})["library_path"] = forced_mount_path
+        current_settings.setdefault("filesystem", {})["cache_dir"] = str(
+            settings_manager.settings.filesystem.cache_dir
+        )
 
     data = dict[str, Any]()
 
@@ -241,6 +285,10 @@ async def set_all_settings(
 
     if forced_mount_path:
         current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
+        current_settings.setdefault("updaters", {})["library_path"] = forced_mount_path
+        current_settings.setdefault("filesystem", {})["cache_dir"] = str(
+            settings_manager.settings.filesystem.cache_dir
+        )
 
     # Validate and save the updated settings
     try:
@@ -315,6 +363,10 @@ async def set_settings(
 
     if forced_mount_path:
         current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
+        current_settings.setdefault("updaters", {})["library_path"] = forced_mount_path
+        current_settings.setdefault("filesystem", {})["cache_dir"] = str(
+            settings_manager.settings.filesystem.cache_dir
+        )
 
     try:
         updated_settings = settings_manager.settings.__class__(**current_settings)
