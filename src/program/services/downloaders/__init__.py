@@ -1,4 +1,8 @@
+from contextlib import nullcontext
 from datetime import datetime, timedelta
+
+import sqlalchemy
+from sqlalchemy.orm import object_session
 from loguru import logger
 from RTN import ParsedData
 
@@ -89,7 +93,30 @@ class Downloader(Runner[None, DownloaderBase]):
         )
 
     def run(self, item: MediaItem) -> MediaItemGenerator:
-        logger.debug(f"Starting download process for {item.log_string} ({item.id})")
+        item_id: int | None = None
+        try:
+            insp = sqlalchemy.inspect(item)
+            if insp.identity and len(insp.identity) == 1:
+                item_id = int(insp.identity[0])
+        except Exception:
+            pass
+
+        def safe_item_label() -> str:
+            try:
+                return item.log_string
+            except Exception:
+                return f"item_id={item_id}"
+
+        def rollback_item_session() -> None:
+            try:
+                sess = object_session(item)
+                if sess is not None:
+                    sess.rollback()
+            except Exception:
+                # best-effort rollback; never mask original exceptions
+                pass
+
+        logger.debug(f"Starting download process for {safe_item_label()} ({item_id})")
 
         # Check if all services are in cooldown due to circuit breaker
         now = datetime.now()
@@ -106,7 +133,7 @@ class Downloader(Runner[None, DownloaderBase]):
             next_attempt = min(self._service_cooldowns.values())
 
             logger.warning(
-                f"All downloader services in cooldown for {item.log_string} ({item.id}), rescheduling for {next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
+                f"All downloader services in cooldown for {safe_item_label()} ({item_id}), rescheduling for {next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
             )
 
             yield RunnerResult(media_items=[item], run_at=next_attempt)
@@ -128,9 +155,15 @@ class Downloader(Runner[None, DownloaderBase]):
                 stream_failed_on_all_services = True
                 stream_hit_circuit_breaker = False
 
+                stream_infohash = None
+                try:
+                    stream_infohash = stream.infohash
+                except Exception:
+                    pass
+
                 for service in available_services:
                     logger.debug(
-                        f"Trying stream {stream.infohash} on {service.key} for {item.log_string}"
+                        f"Trying stream {stream_infohash} on {service.key} for {safe_item_label()}"
                     )
 
                     download_result: DownloadedTorrent | None = None
@@ -145,7 +178,7 @@ class Downloader(Runner[None, DownloaderBase]):
 
                         if not container:
                             logger.debug(
-                                f"Stream {stream.infohash} not available on {service.key}"
+                                f"Stream {stream_infohash} not available on {service.key}"
                             )
                             continue
 
@@ -159,7 +192,7 @@ class Downloader(Runner[None, DownloaderBase]):
                         if self.update_item_attributes(item, download_result, service):
                             logger.log(
                                 "DEBRID",
-                                f"Downloaded {item.log_string} from '{stream.raw_title}' [{stream.infohash}] using {service.key}",
+                                f"Downloaded {safe_item_label()} from '{getattr(stream, 'raw_title', None)}' [{stream_infohash}] using {service.key}",
                             )
 
                             download_success = True
@@ -168,7 +201,7 @@ class Downloader(Runner[None, DownloaderBase]):
                             break
                         else:
                             raise NoMatchingFilesException(
-                                f"No valid files found for {item.log_string} ({item.id})"
+                                f"No valid files found for {safe_item_label()} ({item_id})"
                             )
                     except CircuitBreakerOpen as e:
                         # This specific service hit circuit breaker, set cooldown and try next service
@@ -177,7 +210,7 @@ class Downloader(Runner[None, DownloaderBase]):
                             datetime.now() + cooldown_duration
                         )
                         logger.warning(
-                            f"Circuit breaker OPEN for {service.key}, trying next service for stream {stream.infohash}"
+                            f"Circuit breaker OPEN for {service.key}, trying next service for stream {stream_infohash}"
                         )
                         stream_hit_circuit_breaker = True
                         hit_circuit_breaker = True
@@ -189,8 +222,9 @@ class Downloader(Runner[None, DownloaderBase]):
                         continue
 
                     except Exception as e:
+                        rollback_item_session()
                         logger.debug(
-                            f"Stream {stream.infohash} failed on {service.key}: {e}"
+                            f"Stream {stream_infohash} failed on {service.key}: {e}"
                         )
 
                         if download_result and download_result.id:
@@ -198,11 +232,11 @@ class Downloader(Runner[None, DownloaderBase]):
                                 service.delete_torrent(download_result.id)
 
                                 logger.debug(
-                                    f"Deleted failed torrent {stream.infohash} for {item.log_string} ({item.id}) on {service.key}."
+                                    f"Deleted failed torrent {stream_infohash} for {safe_item_label()} ({item_id}) on {service.key}."
                                 )
                             except Exception as del_e:
                                 logger.debug(
-                                    f"Failed to delete torrent {stream.infohash} for {item.log_string} ({item.id}) on {service.key}: {del_e}"
+                                    f"Failed to delete torrent {stream_infohash} for {safe_item_label()} ({item_id}) on {service.key}: {del_e}"
                                 )
                         continue
 
@@ -219,12 +253,12 @@ class Downloader(Runner[None, DownloaderBase]):
 
                             if success:
                                 logger.debug(
-                                    f"Media analysis completed for {item.log_string}"
+                                    f"Media analysis completed for {safe_item_label()}"
                                 )
                                 break
                             else:
                                 logger.error(
-                                    f"Failed to analyze media file for {item.log_string}"
+                                    f"Failed to analyze media file for {safe_item_label()}"
                                 )
                     else:
                         break
@@ -237,11 +271,11 @@ class Downloader(Runner[None, DownloaderBase]):
                         and len(self.initialized_services) == 1
                     ):
                         logger.debug(
-                            f"Stream {stream.infohash} hit circuit breaker on single provider, will retry after cooldown"
+                            f"Stream {stream_infohash} hit circuit breaker on single provider, will retry after cooldown"
                         )
                     else:
                         logger.debug(
-                            f"Stream {stream.infohash} failed on all {len(available_services)} available service(s), blacklisting"
+                            f"Stream {stream_infohash} failed on all {len(available_services)} available service(s), blacklisting"
                         )
                         item.blacklist_stream(stream)
 
@@ -251,8 +285,9 @@ class Downloader(Runner[None, DownloaderBase]):
                     yield RunnerResult(media_items=[item])
 
         except Exception as e:
+            rollback_item_session()
             logger.error(
-                f"Unexpected error in downloader for {item.log_string} ({item.id}): {e}"
+                f"Unexpected error in downloader for {safe_item_label()} ({item_id}): {e}"
             )
 
         if not download_success:
@@ -262,7 +297,7 @@ class Downloader(Runner[None, DownloaderBase]):
                 next_attempt = min(self._service_cooldowns.values())
 
                 logger.warning(
-                    f"Single provider hit circuit breaker for {item.log_string} ({item.id}), rescheduling for {next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
+                    f"Single provider hit circuit breaker for {safe_item_label()} ({item_id}), rescheduling for {next_attempt.strftime('%m/%d/%y %H:%M:%S')}"
                 )
 
                 yield RunnerResult(media_items=[item], run_at=next_attempt)
@@ -270,7 +305,7 @@ class Downloader(Runner[None, DownloaderBase]):
                 return
             else:
                 logger.debug(
-                    f"Failed to download any streams for {item.log_string} ({item.id})"
+                    f"Failed to download any streams for {safe_item_label()} ({item_id})"
                 )
         else:
             # Clear service cooldowns on successful download
@@ -333,6 +368,14 @@ class Downloader(Runner[None, DownloaderBase]):
         if service is None:
             service = self.service
 
+        item_id: int | None = None
+        try:
+            insp = sqlalchemy.inspect(item)
+            if insp.identity and len(insp.identity) == 1:
+                item_id = int(insp.identity[0])
+        except Exception:
+            pass
+
         try:
             if not download_result.container:
                 raise NotCachedException(
@@ -394,7 +437,13 @@ class Downloader(Runner[None, DownloaderBase]):
 
             return found
         except Exception as e:
-            logger.debug(f"update_item_attributes: exception for item {item.id}: {e}")
+            logger.debug(f"update_item_attributes: exception for item {item_id}: {e}")
+            try:
+                sess = object_session(item)
+                if sess is not None:
+                    sess.rollback()
+            except Exception:
+                pass
             raise
 
     def match_file_to_item(
@@ -430,8 +479,16 @@ class Downloader(Runner[None, DownloaderBase]):
         if service is None:
             service = self.service
 
+        item_id: int | None = None
+        try:
+            insp = sqlalchemy.inspect(item)
+            if insp.identity and len(insp.identity) == 1:
+                item_id = int(insp.identity[0])
+        except Exception:
+            pass
+
         logger.debug(
-            f"match_file_to_item: item={item.id} type={item.type} file='{file.filename}'"
+            f"match_file_to_item: item={item_id} type={getattr(item, 'type', None)} file='{file.filename}'"
         )
 
         found = False
@@ -478,7 +535,12 @@ class Downloader(Runner[None, DownloaderBase]):
 
                     continue
 
-                if episode.state not in [
+                sess = object_session(episode)
+                no_autoflush = sess.no_autoflush if sess is not None else nullcontext()
+                with no_autoflush:
+                    episode_state = episode.state
+
+                if episode_state not in [
                     States.Completed,
                     States.Symlinked,
                     States.Downloaded,

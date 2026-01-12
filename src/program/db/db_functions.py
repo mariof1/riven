@@ -339,14 +339,25 @@ def run_thread_with_db_item(
             if event.item_id:
                 input_item = get_item_by_id(event.item_id, session=session)
 
+                input_item_id = None
+                try:
+                    if input_item is not None:
+                        input_item_id = input_item.id
+                except Exception:
+                    input_item_id = event.item_id
+
                 if input_item:
                     input_item = session.merge(input_item)
-                    runner_result = next(fn(input_item), None)
+                    try:
+                        runner_result = next(fn(input_item), None)
+                    except Exception:
+                        session.rollback()
+                        raise
 
                     if runner_result:
                         if len(runner_result.media_items) > 1:
                             logger.warning(
-                                f"Service {service.__class__.__name__} emitted multiple items for input item {input_item}, only the first will be processed."
+                                f"Service {service.__class__.__name__} emitted multiple items for input item {input_item_id}, only the first will be processed."
                             )
 
                         item = runner_result.media_items[0]
@@ -361,7 +372,11 @@ def run_thread_with_db_item(
                             else:
                                 item.store_state()
 
-                            session.commit()
+                            try:
+                                session.commit()
+                            except Exception:
+                                session.rollback()
+                                raise
 
                         if run_at:
                             return (item.id, run_at)
