@@ -167,7 +167,15 @@ async def save_settings() -> MessageResponse:
     response_model=AppModel,
 )
 async def get_all_settings() -> AppModel:
-    return copy(settings_manager.settings)
+    settings = copy(settings_manager.settings)
+
+    # In monolith mode, the mount path is controlled by the container.
+    forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
+    if monolith and forced_mount_path:
+        settings.filesystem.mount_path = forced_mount_path
+
+    return settings
 
 
 @router.get(
@@ -185,6 +193,13 @@ async def get_settings(
     ],
 ) -> dict[str, Any]:
     current_settings = settings_manager.settings.model_dump()
+
+    # In monolith mode, the mount path is controlled by the container.
+    forced_mount_path = os.environ.get("RIVEN_FILESYSTEM_MOUNT_PATH")
+    monolith = os.environ.get("RIVEN_MONOLITH", "false").lower() == "true"
+    if monolith and forced_mount_path:
+        current_settings.setdefault("filesystem", {})["mount_path"] = forced_mount_path
+
     data = dict[str, Any]()
 
     for path in paths.split(","):

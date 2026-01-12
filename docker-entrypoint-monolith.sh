@@ -294,7 +294,7 @@ start_frontend() {
 
   (
     cd /riven/frontend
-    node build
+    npm run dev -- --host 0.0.0.0 --port 3000 --strictPort
   ) &
   FRONTEND_PID=$!
   ok "Frontend started"

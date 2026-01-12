@@ -198,7 +198,14 @@ class LibraryProfile(BaseModel):
 
     name: str = Field(description="Human-readable profile name")
     library_path: str = Field(
-        description="VFS path prefix for this profile (e.g., '/kids', '/anime')"
+        description="VFS path prefix for this profile (e.g., '/kids', '/anime')",
+        json_schema_extra={
+            # Treat as a path-like string in schema-driven UIs.
+            "format": "path",
+            "pattern": r"^/[a-zA-Z0-9_\-/]+$",
+            "not": {"const": "/default"},
+            "examples": ["/anime", "/kids"],
+        },
     )
     enabled: bool = Field(default=True, description="Enable this profile")
     filter_rules: LibraryProfileFilterRules = Field(
@@ -264,6 +271,13 @@ class FilesystemModel(Observable):
             "Media appears in all matching profile paths. Use '!' prefix in filter lists to exclude values "
             "(e.g., genres: ['action', '!horror'] = action movies but not horror)."
         ),
+        json_schema_extra={
+            # Constrain dynamic profile keys in schema-driven UIs.
+            "propertyNames": {
+                "pattern": r"^[a-z0-9_]+$",
+                "description": "Profile key (lowercase alphanumeric + underscore)",
+            }
+        },
     )
     cache_dir: Path = Field(
         default=Path("/dev/shm/riven-cache"),

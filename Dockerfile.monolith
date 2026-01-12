@@ -9,7 +9,9 @@
 # Frontend Builder
 # -----------------
 FROM node:24-bookworm AS frontend_builder
-ENV NODE_OPTIONS=--max-old-space-size=4096
+# Keep Node memory bounded during image builds; on low-memory machines this
+# prevents the kernel from OOM-killing `vite build` (often shows up as exit 143).
+ENV NODE_OPTIONS=--max-old-space-size=2048
 WORKDIR /app
 
 # Use corepack/pnpm with buildkit caching and a cache-friendly copy order
@@ -21,10 +23,10 @@ RUN --mount=type=cache,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
 COPY frontend/ ./
-RUN --mount=type=cache,target=/pnpm/store \
-  pnpm config set store-dir /pnpm/store && \
-  pnpm run build
-RUN pnpm prune --prod
+
+# Note: We intentionally do NOT run `pnpm run build` here.
+# In constrained environments it may be terminated (exit 143). For the monolith
+# dev image we run the SvelteKit/Vite dev server at runtime instead.
 
 # -----------------
 # Backend Builder
@@ -110,10 +112,7 @@ COPY src/ ./src
 COPY pyproject.toml uv.lock* ./
 
 # Frontend runtime
-COPY --from=frontend_builder /app/build /riven/frontend/build
-COPY --from=frontend_builder /app/node_modules /riven/frontend/node_modules
-COPY --from=frontend_builder /app/package.json /riven/frontend/package.json
-COPY frontend/drizzle /riven/frontend/drizzle
+COPY --from=frontend_builder /app /riven/frontend
 
 # Entrypoint
 COPY docker-entrypoint-monolith.sh /usr/local/bin/
