@@ -202,7 +202,9 @@ class LibraryProfile(BaseModel):
         json_schema_extra={
             # Treat as a path-like string in schema-driven UIs.
             "format": "path",
-            "pattern": r"^/[a-zA-Z0-9_\-/]+$",
+            # NOTE: Keep this regex compatible with JS RegExp + HTML pattern.
+            # Put '-' at the end of the character class to avoid range parsing.
+            "pattern": r"^/[a-zA-Z0-9_/-]+$",
             "not": {"const": "/default"},
             "examples": ["/anime", "/kids"],
         },
@@ -227,7 +229,7 @@ class LibraryProfile(BaseModel):
         # Check for valid characters (alphanumeric, dash, underscore, slash)
         import re
 
-        if not re.match(r"^/[a-zA-Z0-9_\-/]+$", v):
+        if not re.match(r"^/[a-zA-Z0-9_/-]+$", v):
             raise ValueError(
                 "library_path must contain only alphanumeric characters, dashes, underscores, and slashes"
             )
