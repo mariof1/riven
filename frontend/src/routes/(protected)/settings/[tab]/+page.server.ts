@@ -99,7 +99,7 @@ export const load: PageServerLoad = async ({ fetch, locals, params }) => {
     const tab = params.tab;
     const config = TAB_CONFIG[tab];
     if (!config) {
-        redirect(302, "/settings/general");
+        throw redirect(302, "/settings/general");
     }
 
     const [fullSchema, allSettings] = await Promise.all([
@@ -131,7 +131,7 @@ export const actions = {
         const tab = params.tab;
         const config = TAB_CONFIG[tab];
         if (!config) {
-            redirect(302, "/settings/general");
+            throw redirect(302, "/settings/general");
         }
 
         const fullSchema = await getFullSchema(locals.backendUrl, locals.apiKey, fetch);

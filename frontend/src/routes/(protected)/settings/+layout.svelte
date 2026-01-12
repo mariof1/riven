@@ -1,6 +1,5 @@
 <script lang="ts">
     import { page } from "$app/stores";
-    import { goto } from "$app/navigation";
 
     type Tab = {
         key: string;
@@ -25,10 +24,6 @@
     ];
 
     const isActive = (tabKey: string) => $page.params.tab === tabKey;
-
-    const onChange = (href: string) => {
-        void goto(href);
-    };
 </script>
 
 <div class="mt-14 h-full w-full p-6 md:p-8 md:px-16">
@@ -46,7 +41,6 @@
                                 ? "bg-muted text-foreground"
                                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")
                         }
-                        on:click|preventDefault={() => onChange(tab.href)}
                     >
                         {tab.label}
                     </a>
